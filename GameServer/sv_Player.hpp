@@ -2,55 +2,58 @@
 #include <iostream>
 #include <deque>
 #include <vector>
+#include <unordered_map>
 
+#include "NetServerConnection.hpp"
+#include "PlayerStats.hpp"
 #include "PacketStruct.hpp"
 #include "utils.hpp"
+#include "sv_GameMap.hpp"
+#include "MessageTypes.hpp"
 
-struct Bullet
+class PlayerProperies
 {
-	Vector2f pos;
-	float rotation;
+protected:
+	static constexpr float m_fExpectedPlayerSpeed = 400.f;
+	static constexpr float m_fExpectedPlayerReloadTime = 0.5f;
+	static constexpr float m_fPlayerRadius = 20.f;
+	static constexpr float m_fBulletSpeed = 500.f;
+	static constexpr float m_fPlayerMaxHealth = 100.f;
+	static constexpr float m_fBulletRadius = 10.f;
 };
 
-struct PlayerRecord
-{
-	double d_ServerTimePoint;
-	double d_ClientTimePoint;
-	Vector2f Pos;
-};
+class GameServer;
 
-struct PlayerObjects
-{
-	std::deque<Bullet> bullets;
-	std::vector<PlayerRecord> records;
-	bool shotRay = false;
-	double lastShotTime = 0.0;
-};
-
-struct PacketInfo
-{
-	double cl_PacketDispatchTime = 0.0;
-	double sv_PacketArriveTime = 0.0;
-};
-
-struct GameState
-{
-	PacketInfo packetInfo;
-	PlayerMovementData playerMovementData;
-	PlayerActionsData playerActionsData;
-	PlayerObjects playerObjects;
-	Vector2f rayStart;
-	Vector2f rayEnd;
-	int health;
-};
-
-class Player
+class Player : protected PlayerProperies
 {
 public:
-	Player();
+	Player(const uint32_t id, GameMap& map, GameServer* const gs);
 	~Player();
 
-private:
+	void SetClient(std::shared_ptr<net::ServerConnection<GameMessages>>& tcpClient);
+	std::shared_ptr<net::ServerConnection<GameMessages>> GetTcpClient();
 
+	void Udpate(std::unordered_map<uint32_t, std::shared_ptr<Player>>& mapPayers);
+
+	GameState& GetGameState() { return m_PlayerGameState; }
+	const GameState& GetGameState() const { return m_PlayerGameState; }
+	void CheckIfPlayerDied(GameState& playerGameState, GameState& otherPlayerGameState);
+
+private:
+	bool CheckCircleCollide(double x1, double y1, float r1, double x2, double y2, float r2);
+	bool TraceRay(GameState& playerGameState, PlayerMovementData& otherPlayerInfo, Vector2f& intersectionPoint);
+	void ProcessPlayerShot(GameState& playerGameState, GameState& otherPlayerGameState);
+	uint32_t CalcDamageAmount(GameState& hitPlayerGameState, Vector2f rayIntersectionPoint);
+	void PreCalcShotRay(GameState& playerGameState);
+	void SimulateBullets(const uint32_t playerId, GameState& playerGameState);
+
+private:
+	const uint32_t m_id;
+	GameMap& m_Map;
+
+	GameServer* m_Server;
+	GameState m_PlayerGameState;
+	std::shared_ptr<net::ServerConnection<GameMessages>> m_TcpClient;
+	//std::shared_ptr<net::ServerUdpConnection<GameMessages>> m_UdpClient = nullptr;
 };
 

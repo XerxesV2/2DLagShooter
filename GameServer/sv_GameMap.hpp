@@ -1,5 +1,7 @@
 #pragma once
-#include "sv_Player.hpp"
+#include "PlayerStats.hpp"
+#include "utils.hpp"
+#include "SharedVariables.hpp"
 
 #include <vector>
 
@@ -14,6 +16,8 @@ public:
 	//g_RayLength = no collision happened
 	Vector2f GetRayIntersectionPoint(Vector2f rayStart, Vector2f rayEnd);
 
+public:
+	static constexpr BBox  m_MapBB = { 0.f, 0.f, 1920.f, 1080.f };
 private:
 	void DoPlayerWallCollision(Vector2f& playerPos);
 	void DoPlayerMapBorderCollsion(Vector2f& playerPos);

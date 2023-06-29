@@ -1,4 +1,5 @@
 #pragma once
+#include "SharedVariables.hpp"
 
 struct Vector2f
 {
@@ -84,6 +85,14 @@ struct PlayerMovementData
 	unsigned int u_PlayerActions{ 0 };
 };
 
+struct AddPlayerData
+{
+	unsigned int n_uID;
+	char sz_Unsername[20]{0};
+	int score = 0;
+	Vector2f v_fPos;
+};
+
 struct PlayerActionsData
 {
 	unsigned int n_uID;
@@ -95,6 +104,12 @@ struct PlayerActionsData
 	unsigned int u_PlayerActions{ 0 };
 };
 
+struct ChatMessageData
+{
+	unsigned int n_uID;
+	char msg[maxChatMessageLength] = {0};
+};
+
 struct sv_HitregData
 {
 	unsigned int n_uID;
@@ -104,11 +119,11 @@ struct sv_HitregData
 	Vector2f v_fPos;
 };
 
-struct sv_PlayerStateData
+struct sv_PLayerDiedData
 {
 	unsigned int n_uID;
-
-	unsigned int u_PlayerStates{ 0 };
-	Vector2f v_fPos;
+	unsigned int n_uPerpetratorID;
+	Vector2f v_fRespawnPos;
 };
+
 //#pragma pack(pop)

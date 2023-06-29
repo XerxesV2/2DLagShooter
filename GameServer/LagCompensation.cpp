@@ -4,22 +4,22 @@
 
 //#define DEBUG
 
-LagCompensation::LagCompensation(const double* _pCurrentTime)
+LagCompensation::LagCompensation()
 {
-	m_pCurrentTime = _pCurrentTime;
+	
 }
 
 LagCompensation::~LagCompensation()
 {
 }
 
-void LagCompensation::UpdatePlayerLagRecord(GameState& gameState, double currentTime)
+void LagCompensation::UpdatePlayerLagRecord(GameState& gameState)
 {
 	if (!gameState.playerObjects.records.empty()) {
 		gameState.playerObjects.records.erase(
 			std::remove_if(gameState.playerObjects.records.begin(), gameState.playerObjects.records.end(),
-				[currentTime](const PlayerRecord& record) {
-					if (currentTime - record.d_ServerTimePoint >= 1.0) {
+				[](const PlayerRecord& record) {
+					if (g_CurrentTime - record.d_ServerTimePoint >= 1.0) {
 						//std::cout << "record outdated...\n"; 
 						return true;
 					}
@@ -38,8 +38,8 @@ void LagCompensation::UpdatePlayerLagRecord(GameState& gameState, double current
 
 void LagCompensation::Prepare(GameState& playerGameState)
 {
-	m_PacketLatency = *m_pCurrentTime - playerGameState.packetInfo.cl_PacketDispatchTime;
-	m_ClientCommandExecutionTime = *m_pCurrentTime - m_PacketLatency;	//this is unnecessary
+	m_PacketLatency = g_CurrentTime - playerGameState.packetInfo.cl_PacketDispatchTime;
+	m_ClientCommandExecutionTime = g_CurrentTime - m_PacketLatency;	//this is unnecessary
 	m_ClientInterpolationTime = std::min(playerGameState.playerActionsData.playerActionTime - playerGameState.playerActionsData.serverPacketArriveTime, 1.0 / clientUpdateRate);
 }
 
@@ -110,13 +110,7 @@ void LagCompensation::Start(const uint32_t playerId, const uint32_t otherPlayerI
 
 void LagCompensation::End(GameState& otherPlayerGameState)
 {
-	//check if player died for the respawn 
-	if (otherPlayerGameState.health <= 0) {
-		otherPlayerGameState.health = 100;
-	}
-	else {
-		otherPlayerGameState.playerMovementData.v_fPos = otherPlayerGameState.playerObjects.records.back().Pos;	//restore player position
-	}
+	otherPlayerGameState.playerMovementData.v_fPos = otherPlayerGameState.playerObjects.records.back().Pos;	//restore player position
 }
 
 void LagCompensation::Finish(GameState& playerGameState)

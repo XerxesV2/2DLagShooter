@@ -8,13 +8,14 @@
 #include "sv_Player.hpp"
 
 inline float g_fDeltaTime = 0.f;
+inline double g_CurrentTime = 0.f;
 class LagCompensation
 {
 public:
-	LagCompensation(const double* _pCurrentTime);
+	LagCompensation();
 	~LagCompensation();
 
-	void UpdatePlayerLagRecord(GameState& gameState, double currentTime);
+	void UpdatePlayerLagRecord(GameState& gameState);
 	void Prepare(GameState& playerGameState);
 	void Start(const uint32_t playerId, const uint32_t otherPlayerId, GameState& playerGameState, GameState& otherPlayerGameState);
 	void End(GameState& otherPlayerGameState);
@@ -26,9 +27,9 @@ private:
 	double m_PacketLatency = 0.0;
 	double m_ClientCommandExecutionTime = 0.0;
 	double m_ClientInterpolationTime = 0.0;
-	const double* m_pCurrentTime = nullptr;
 
 	bool m_bLagComp = true;
 	bool m_bLagCompInterP = true;
 };
 
+inline LagCompensation* g_pLagCompensation = new LagCompensation {};
