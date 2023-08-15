@@ -1,10 +1,26 @@
 #include "cl_Chat.hpp"
 #include "cl_GameNetwork.hpp"
+#include "AudioManager.hpp"
 #include "PlayerStruct.hpp"
+#include "utils.hpp"
 
-Chat::Chat() : m_ChatMessage(m_Font, 40)
+#include <filesystem>
+
+Chat::Chat() : m_ChatMessage(m_Font, 34)
 {
 	m_Font.loadFromFile("C:\\Windows\\Fonts\\Arial.ttf");
+
+	/*for (size_t i = 0; i < sizeof(shared::RankNames) / sizeof(shared::RankNames[0]); i++)
+	{
+		m_RankIdMap.insert({ shared::RankNames[i], (shared::PlayerRank)i });
+	}*/
+
+	std::string path = "sounds\\bloodpressure";
+	uint32_t i = (uint32_t)GameSounds::END;
+	for (const auto& entry : std::filesystem::directory_iterator(path)) {
+		m_SoundNames.insert({ entry.path().stem().string(), i});
+		++i;
+	}
 }
 
 Chat::~Chat()
@@ -36,6 +52,13 @@ void Chat::Init(sf::RenderWindow* window, PlayerStruct* pLocalPlayer, std::share
 	SetForeground(false);
 }
 
+void Chat::Reset()
+{
+	m_ChatMessages.clear();
+	m_NameList.clear();
+	m_pTextBox->Clear();
+}
+
 void Chat::Update()
 {
 	static bool enterHold = false;
@@ -50,8 +73,11 @@ void Chat::Update()
 			}
 			else
 			{
-				m_pNetwork->SendChatMessage(msg.c_str(), msg.size());
-				AppendMessage(m_pLocalPlayer, msg.c_str());
+				if (msg.size() < maxChatMessageLength)
+					m_pNetwork->SendChatMessage(msg.c_str(), msg.size());
+				else
+					AppendPlainMessage(sf::Color(122, 95, 48, 255), "Message too big");
+				//AppendMessage(m_pLocalPlayer, msg.c_str());
 			}
 		}
 		m_pTextBox->Clear();
@@ -85,47 +111,78 @@ void Chat::draw(sf::RenderTarget& target, const sf::RenderStates states) const
 	target.draw(*m_pTextBox);
 }
 
-void Chat::AppendMessage(PlayerStruct* pPlayer, const char* message)
+void Chat::AppendMessage(PlayerStruct* pPlayer, const ChatMessageData* message)
 {
 	if (m_ChatMessages.size() >= m_MaxMessages)
 		m_ChatMessages.pop_front();
 
 	//sf::Color(235, 9, 9, 255) admin
 
-	static sf::Color nameColor;
-	if (pPlayer != nullptr)
-		nameColor = pPlayer->stats.teammate ? sf::Color(22, 242, 2, 255) : sf::Color(5, 153, 245, 255);
+	static sf::Color teamColor;
+	if (pPlayer != nullptr) {
+		teamColor = pPlayer->stats.team == m_pLocalPlayer->stats.team ? sf::Color(22, 242, 2, 255) : sf::Color(5, 153, 245, 255);
+		AudioManager::Get().PlayGameSound(GameSounds::CHAT_MESSAGE, 50.f);
+		FindMagicWordInChatMessage(message->msg);
+	}
 	else
-		nameColor = sf::Color::Magenta;
+		teamColor = sf::Color::Magenta;
 
-	nameColor.a = 0;
+	teamColor.a = 0;
 
-	m_ChatMessage.texts.clear();
-	if (pPlayer != nullptr)
-		m_ChatMessage.Append((std::string("[") + pPlayer->stats.username + "]:").c_str());
-	else
-		m_ChatMessage.Append("[SERVER]:");
-	m_ChatMessage.SetFillColorBack(nameColor);
+	m_ChatMessage.Clear();
+
+	switch (message->fMsgFlags)
+	{
+	case (BYTE)FLAGS_CHATMSG::client_msg:
+		m_ChatMessage.Append(("(" + Utils::CurrentTimeToShortString() + ")").c_str());
+		m_ChatMessage.SetFillColorBack(teamColor);
+		m_ChatMessage.Append(pPlayer->stats.displayName.c_str());
+		m_ChatMessage.SetFillColorBack(m_RankColorMap[pPlayer->stats.rank]);
+		m_ChatMessage.Append(":");
+		m_ChatMessage.SetFillColorBack(sf::Color(100,100,100,255));
+		break;
+	case (BYTE)FLAGS_CHATMSG::private_msg:
+		m_ChatMessage.Append(("(" + Utils::CurrentTimeToShortString() + ")").c_str());
+		m_ChatMessage.SetFillColorBack(teamColor);
+		m_ChatMessage.Append(pPlayer->stats.displayName.c_str());
+		m_ChatMessage.SetFillColorBack(m_RankColorMap[pPlayer->stats.rank]);
+		m_ChatMessage.Append("=>");
+		m_ChatMessage.SetFillColorBack(sf::Color(2, 170, 242, 255));
+		break;
+	case (BYTE)FLAGS_CHATMSG::moderate_msg:
+	case (BYTE)FLAGS_CHATMSG::server_msg:
+		m_ChatMessage.Append("[SERVER]:"); 
+		m_ChatMessage.SetFillColorBack(teamColor);
+		break;
+	default: break;
+	}
+	/*same line*/
+	m_ChatMessage.Append(message->msg);
+	m_ChatMessage.SetFillColorBack(sf::Color(212, 212, 212));
+
 	for (auto& log : m_ChatMessages)
 		log.first.Move(0.f, -(GlobChat::m_AppendOffsetY + GlobChat::m_SpaceingY));
 	m_ChatMessages.push_back(std::make_pair(m_ChatMessage, m_Clock.getElapsedTime()));
 
-	/*same line*/
-	m_ChatMessages.back().first.Append(message);
-	m_ChatMessages.back().first.SetFillColorBack(sf::Color::White);
 
 	SetForeground(m_pTextBox->IsActive());
 }
 
-void Chat::AppendPlainMessage(const char* message, sf::Color& color)
+void Chat::AppendPlainMessage(sf::Color& color, const char* message, ...)
 {
+	char formattedMsgBuffer[521];
+	va_list args;
+	va_start(args, message);
+	vsnprintf(formattedMsgBuffer, sizeof(formattedMsgBuffer), message, args);
+	va_end(args);
+
 	if (m_ChatMessages.size() >= m_MaxMessages)
 		m_ChatMessages.pop_front();
 
 	color.a = 0;
 
 	m_ChatMessage.texts.clear();
-	m_ChatMessage.Append(message);
+	m_ChatMessage.Append(formattedMsgBuffer);
 	m_ChatMessage.SetFillColorBack(color);
 	for (auto& msg : m_ChatMessages)
 		msg.first.Move(0.f, -(GlobChat::m_AppendOffsetY + GlobChat::m_SpaceingY));
@@ -134,15 +191,21 @@ void Chat::AppendPlainMessage(const char* message, sf::Color& color)
 	SetForeground(m_pTextBox->IsActive());
 }
 
-void Chat::AppendPlainMessage(const char* message, sf::Color&& color)
+void Chat::AppendPlainMessage(sf::Color&& color, const char* message, ...)
 {
+	char formattedMsgBuffer[512];
+	va_list args;
+	va_start(args, message);
+	vsnprintf(formattedMsgBuffer, sizeof(formattedMsgBuffer), message, args);
+	va_end(args);
+
 	if (m_ChatMessages.size() >= m_MaxMessages)
 		m_ChatMessages.pop_front();
 
 	color.a = 0;
 
 	m_ChatMessage.texts.clear();
-	m_ChatMessage.Append(message);
+	m_ChatMessage.Append(formattedMsgBuffer);
 	m_ChatMessage.SetFillColorBack(color);
 	for (auto& msg : m_ChatMessages)
 		msg.first.Move(0.f, -(GlobChat::m_AppendOffsetY + GlobChat::m_SpaceingY));
@@ -163,7 +226,6 @@ void Chat::RemovePlayerFromPlayerList(const std::string& name)
 
 void Chat::UpdateMessages()
 {
-	uint8_t popAmount = 0;
 	for (auto& [log, time] : m_ChatMessages) {
 
 		if (m_Clock.getElapsedTime().asSeconds() < time.asSeconds() + GlobChat::m_MessageFadeInTime) {
@@ -219,10 +281,10 @@ void Chat::HandleUserCommand(std::string& strcmd)
 		case shared::UserCmd::ADD_HEALTH:
 		{
 			get_next_param();
-			if (offset != std::string::npos && m_NameList.count(sub))
+			if (m_NameList.count(sub))
 				cmd.uIDLeft = m_NameList[sub];
 			else {
-				AppendPlainMessage("Name not found", sf::Color(122, 95, 48, 255)); return;
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Name not found"); return;
 			}
 			get_next_param();
 			bool neg = false;
@@ -234,7 +296,7 @@ void Chat::HandleUserCommand(std::string& strcmd)
 				cmd.iValue = std::stoi(sub) * (neg ? -1 : 1);
 			}
 			else {
-				AppendPlainMessage("No number specified", sf::Color(122, 95, 48, 255)); return;
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "No number specified"); return;
 			}
 		} break;
 
@@ -243,7 +305,9 @@ void Chat::HandleUserCommand(std::string& strcmd)
 			get_next_param();
 			if (m_NameList.count(sub))
 				cmd.uIDLeft = m_NameList[sub];
-
+			else {
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Player name not found"); return;
+			}
 			cmd.iValue = -9999;
 
 		} break;
@@ -254,26 +318,91 @@ void Chat::HandleUserCommand(std::string& strcmd)
 			if (offset != std::string::npos && m_NameList.count(sub))
 				cmd.uIDLeft = m_NameList[sub];
 			else {
-				AppendPlainMessage("First name not found", sf::Color(122, 95, 48, 255)); return;
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "First name not found"); return;
 			}
 
 			get_next_param();
 			if (m_NameList.count(sub))
 				cmd.uIDRight = m_NameList[sub];
 			else {
-				AppendPlainMessage("Secound name not found", sf::Color(122, 95, 48, 255)); return;
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Secound name not found"); return;
 			}
 
 		} break;
+		case shared::UserCmd::SET_RANK:
+		{
+			get_next_param();
+			if (m_NameList.count(sub))
+				cmd.uIDLeft = m_NameList[sub];
+			else {
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Bad player name"); return;
+			}
+
+			get_next_param();
+			if(m_RankIdMap.count(sub))
+				cmd.iValue = (int)m_RankIdMap[sub];
+			else {
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Non-existent rank name"); return;
+			}
+
+		}break;
+
+		case shared::UserCmd::BAN:
+		{
+			get_next_param();
+			if (m_NameList.count(sub))
+				cmd.uIDLeft = m_NameList[sub];
+			else {
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Incorrect player name"); return;
+			}
+
+			get_next_param();
+			if (is_number(sub, true))
+			{
+				cmd.iValue = std::stoi(sub);
+			}
+			else {
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "No/Negative number specified"); return;
+			}
+		}break;
+
+		case shared::UserCmd::PRIVATE_MESSAGE:
+		{
+			get_next_param();
+			if (m_NameList.count(sub))
+				cmd.uIDLeft = m_NameList[sub];
+			else {
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Invalid player name"); return;
+			}
+
+			get_next_param();
+			if (sub.size() > maxChatMessageLength){
+				AppendPlainMessage(sf::Color(122, 95, 48, 255), "Message too big"); return;
+			}
+
+			m_pNetwork->SendPrivateChatMessage(sub.c_str(), sub.size(), cmd.uIDLeft);
+			return;
+		}break;
+
+		case shared::UserCmd::MUTE:
+		{
+			AudioManager::Get().StopAllSounds();
+		}
+		break;
 
 		case shared::UserCmd::HELP:
 		default: 
 		{
-			AppendPlainMessage("/add [ammo/health] <player> [amount]\n"
+			AppendPlainMessage(sf::Color(122, 110, 60, 255), 
+								"/msg <player> [message]\n"
+								"/add [ammo/health] <player> [amount]\n"
 								"/kill <player>\n"
 								"/ban <player> [time in sec]\n"
-								"/tp <player> <player>"
-								, sf::Color(122, 110, 60, 255)); return;
+								"/tp <player> <player>\n"
+								"/op/deop <player>\n"
+								"/setrank <player> [rank]\n"
+								"/mute (stops all audio)"
+								); return;
 		}break;
 		}
 		
@@ -282,7 +411,7 @@ void Chat::HandleUserCommand(std::string& strcmd)
 		
 	} while (0);
 
-	AppendPlainMessage("Unknown command", sf::Color(122, 95, 48, 255));
+	AppendPlainMessage(sf::Color(122, 95, 48, 255), "Unknown command");
 	
 
 }
@@ -296,4 +425,19 @@ void Chat::SetForeground(bool foreground)
 		message.first.aplha = a;
 	}
 	m_pTextBox->SetAlpha(a);
+}
+
+void Chat::FindMagicWordInChatMessage(std::string msg)
+{
+	if (m_SoundNames.find(msg) != m_SoundNames.end()) {
+		AudioManager::Get().PlayGameSound((GameSounds)m_SoundNames[msg], 90.f);
+		return;
+	}
+
+	for (auto& [name, id] : m_SoundNames) {
+		if (msg.find(name) != std::string::npos) {
+			AudioManager::Get().PlayGameSound((GameSounds)id, 90.f);
+			break;
+		}
+	}
 }

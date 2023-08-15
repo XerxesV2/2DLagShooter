@@ -15,6 +15,8 @@ public:
 	void MainLoop();
 
 private:
+    void Startup();
+    void Disconnected();
     void UpdateClient();
     void DrawFrame();
     void HandleEvents();

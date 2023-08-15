@@ -3,6 +3,7 @@
 #include "SharedVariables.hpp"
 #include "UI/LogSystem.hpp"
 #include "UI/LeaderBoard.hpp"
+#include "UI/Killfeed.hpp"
 #include <sstream>
 
 //#define DEBUG
@@ -60,25 +61,46 @@ void Players::EnableInterpolation()
     LogSystem::Get().PrintMessage(m_bInterpolate ? "on" : "off", m_bInterpolate ? sf::Color::Green : sf::Color::Red, true);
 }
 
+void Players::ChangeMouseRelative()
+{
+    m_bRelativeMouse = !m_bRelativeMouse;
+    LogSystem::Get().PrintMessage("The aim is ", sf::Color(90, 90, 100, 255));
+    LogSystem::Get().PrintMessage(m_bInterpolate ? "ralative" : "not ralative", m_bInterpolate ? sf::Color::Yellow : sf::Color::Blue, true);
+}
+
 void Players::UpdateLocalPlayer()
 {
     UpdateCheats();
     if (!window.hasFocus() || Chat::Get().IsActive()) return;
 
-
+    /* -= MOVEMENT UPDATE =- */
+    m_pLocalPlayer->dirVec = { 0.f, 0.f };
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::A))
-        m_pLocalPlayer->st_PlayerMovementInfo.v_fPos.x -= m_fSpeed * m_fDeltaTime, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions |= (UINT32)PLAYER_ACTION::move_left;
-    if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
-        m_pLocalPlayer->st_PlayerMovementInfo.v_fPos.x += m_fSpeed * m_fDeltaTime, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions |= (UINT32)PLAYER_ACTION::move_right;
+        m_pLocalPlayer->dirVec.x =  -1.f, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions |= (UINT32)PLAYER_ACTION::move_left;
+    else if (sf::Keyboard::isKeyPressed(sf::Keyboard::D))
+        m_pLocalPlayer->dirVec.x =  1.f, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions  |= (UINT32)PLAYER_ACTION::move_right;
     if (sf::Keyboard::isKeyPressed(sf::Keyboard::W))
-        m_pLocalPlayer->st_PlayerMovementInfo.v_fPos.y -= m_fSpeed * m_fDeltaTime, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions |= (UINT32)PLAYER_ACTION::move_up;
-    if (sf::Keyboard::isKeyPressed(sf::Keyboard::S))
-        m_pLocalPlayer->st_PlayerMovementInfo.v_fPos.y += m_fSpeed * m_fDeltaTime, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions |= (UINT32)PLAYER_ACTION::move_down;
+        m_pLocalPlayer->dirVec.y =  -1.f, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions |= (UINT32)PLAYER_ACTION::move_up;
+    else if (sf::Keyboard::isKeyPressed(sf::Keyboard::S))
+        m_pLocalPlayer->dirVec.y =  1.f, m_pLocalPlayer->st_PlayerMovementInfo.u_PlayerActions  |= (UINT32)PLAYER_ACTION::move_down;
+
+    Vector2f movementAmount = m_pLocalPlayer->dirVec * m_fSpeed * m_fDeltaTime;
+    m_pLocalPlayer->st_PlayerMovementInfo.v_fPos += movementAmount;
 
     m_Map.ArrangePlayerCollision(m_pLocalPlayer->st_PlayerMovementInfo.v_fPos);
 
     SetPlayerPos(m_LocalPlayerID, m_pLocalPlayer->st_PlayerMovementInfo.v_fPos.x, m_pLocalPlayer->st_PlayerMovementInfo.v_fPos.y);
 
+    if (!m_bRelativeMouse && !m_bMouseMoved)
+        sf::Mouse::setPosition(sf::Mouse::getPosition() + sf::Vector2i(movementAmount.x, movementAmount.y));
+    else
+        m_bMouseMoved = false;
+
+    /* -= FLAG UPDATE =- */
+    if(m_pLocalPlayer->stats.hasFlag)
+        m_Map.SetFlagPosition(m_pLocalPlayer->st_PlayerMovementInfo.v_fPos, m_pLocalPlayer->stats.team == 2);
+
+    /* -= MOUSE UPDATE =- */
     static sf::Vector2i prevMousePos = { 0,0 };
     sf::Vector2i mousePos = sf::Mouse::getPosition(window);
     if (prevMousePos != mousePos || m_bShouldSendPacket) {
@@ -121,6 +143,9 @@ void Players::UpdateOtherPlayers()
 
         if(m_pLocalPlayer->st_PlayerActionsInfo.u_PlayerActions & (UINT32)PLAYER_ACTION::shot_ray) //debug
             realPlayerGhost.setPosition(player.playerShape.getPosition());
+
+        if (player.stats.hasFlag)
+            m_Map.SetFlagPosition({ player.playerShape.getPosition().x, player.playerShape.getPosition().y }, player.stats.team == 2);
     }
 }
 
@@ -159,7 +184,7 @@ void Players::UpdateObjects()
 void Players::UpdateStatText(PlayerStruct& player)
 {
     std::stringstream ss;
-    ss << player.stats.username << '\n';
+    ss << player.stats.displayName << '\n';
     ss << "ID: " << player.st_PlayerMovementInfo.n_uID << '\n';
     ss << "PING: " << (int)(player.stats.ping * 1000.f) << "ms" << '\n';
     ss << "HP: " << player.stats.health;
@@ -170,7 +195,7 @@ void Players::UpdateStatText(PlayerStruct& player)
 
 void Players::UpdateLocalPlayerActions()
 {
-    if (m_pLocalPlayer->stats.ammo > 0 && m_coolDown.getElapsedTime().asSeconds() >= m_fFireRate && sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+    if (m_pLocalPlayer->stats.ammo > 0 && m_coolDown.getElapsedTime().asSeconds() >= g_fPlayerReloadTime && sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
         m_pLocalPlayer->beamBlueprint.setPosition(m_pLocalPlayer->playerShape.getPosition());
         m_pLocalPlayer->beamBlueprint.setRotation(m_pLocalPlayer->st_PlayerMovementInfo.rotation);
 
@@ -202,11 +227,14 @@ void Players::UpdateLocalPlayerActions()
         m_pLocalPlayer->beams.push_back(std::make_pair(m_pLocalPlayer->beamBlueprint, m_clTime.getElapsedTime()));
 
         m_pLocalPlayer->st_PlayerActionsInfo.playerActionTime = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+        m_pLocalPlayer->st_PlayerActionsInfo.v_fPos = m_pLocalPlayer->st_PlayerMovementInfo.v_fPos;
+        m_pLocalPlayer->st_PlayerActionsInfo.rotation = m_pLocalPlayer->st_PlayerMovementInfo.rotation;
 #ifdef DEBUG
         printf("Interpolation on server side sould be %f\n", m_pLocalPlayer->st_PlayerActionsInfo.playerActionTime - m_pLocalPlayer->st_PlayerActionsInfo.serverPacketArriveTime);
         printf("playerActionTime %f\n", m_pLocalPlayer->st_PlayerActionsInfo.playerActionTime);
         printf("serverPacketArriveTime %f\n", m_pLocalPlayer->st_PlayerActionsInfo.serverPacketArriveTime);
 #endif
+        AudioManager::Get().PlayGameSound(GameSounds::PLAYER_SHOOT, 90.f);
     }
 }
 
@@ -347,7 +375,7 @@ void Players::DeltaTimeManipulationSpeedHack() {
 
 void Players::RapidFireHack()
 {
-    m_fFireRate = 0.05f;
+    //m_fFireRate = 0.05f;
 }
 
 void Players::BotMove() {
@@ -398,9 +426,10 @@ void Players::InitPlayer(AddPlayerData& addData)
 
     ps.statsText.setFont(m_Font);
     ps.statsText.setCharacterSize(30);
+    if(m_pLocalPlayer != nullptr)
+        ps.statsText.setFillColor(ps.stats.team == m_pLocalPlayer->stats.team ? sf::Color(7, 227, 73, 255) : sf::Color(255, 70, 46, 255));
     ps.statsText.setString(std::to_string(addData.n_uID));
     ps.statsText.setOrigin(sf::Vector2f{ ps.statsText.getGlobalBounds().width, ps.statsText.getGlobalBounds().height - 50.f } / 2.f);
-    ps.statsText.setFillColor(sf::Color::Red);
     ps.statsText.setPosition(ps.playerShape.getPosition().x, ps.playerShape.getGlobalBounds().top + ps.playerShape.getGlobalBounds().height);
 
     ps.bulletStyle.setRadius(10.f);
@@ -412,32 +441,44 @@ void Players::InitPlayer(AddPlayerData& addData)
     ps.beamBlueprint.setOrigin(0.f, 2.f);
 
     ps.stats.score = addData.score;
+    ps.stats.team = addData.team;
+    ps.stats.hasFlag = addData.b_HasFlag;
+    ps.stats.rank = (shared::PlayerRank)addData.rank;
     ps.stats.health = 100;
     ps.stats.ammo = 30;
     ps.stats.ID = addData.n_uID;
     ps.stats.username.assign(addData.sz_Unsername);
+    ps.stats.displayName.assign(shared::RankNames[(size_t)addData.rank]);
+    ps.stats.displayName.append(addData.sz_Unsername);
 
-    if(m_LocalPlayerID != addData.n_uID)
-        ps.stats.teammate = false;
+    if(!addData.b_WasInGame)
+        AudioManager::Get().PlayGameSound(addData.rank == 0 ? GameSounds::VIP_JOIN : GameSounds::PLAYER_JOIN, 80.f);
 
     m_mapPlayers[addData.n_uID] = ps;
 
     LeaderBoard::Get().AddNewItem(&m_mapPlayers[addData.n_uID].stats);
-    LogSystem::Get().PrintMessage(ps.stats.username.c_str(), sf::Color(235, 5, 154, 200));
+    LogSystem::Get().PrintMessage(ps.stats.displayName.c_str(), sf::Color(235, 5, 154, 200));
     LogSystem::Get().PrintMessage(" joined the game.", sf::Color(214, 11, 85, 200), true);
+   
 }
 
 void Players::AddLocalPlayer(AddPlayerData& addData)
 {
      m_pLocalPlayer = &m_mapPlayers[m_LocalPlayerID];
+
+     for (auto& [id, player] : m_mapPlayers)
+     {
+         player.statsText.setFillColor(player.stats.team == m_pLocalPlayer->stats.team ? sf::Color(7, 227, 73, 255) : sf::Color(255, 70, 46, 255));
+     }
 }
 
 void Players::RemovePlayer(uint32_t id)
 {
     LeaderBoard::Get().RemoveItem(&m_mapPlayers[id].stats);
     LeaderBoard::Get().UpdateText(&m_mapPlayers[id].stats);
-    LogSystem::Get().PrintMessage(m_mapPlayers[id].stats.username.c_str(), sf::Color(235, 5, 154, 200));
+    LogSystem::Get().PrintMessage(m_mapPlayers[id].stats.displayName.c_str(), sf::Color(235, 5, 154, 200));
     LogSystem::Get().PrintMessage(" has left the game.", sf::Color(156, 12, 48, 200), true);
+    AudioManager::Get().PlayGameSound(GameSounds::PLAYER_LEFT, 90.f);
     m_mapPlayers.erase(id);
     std::cout << "Player removed with ID: " << id << "\n";
     if (id == m_LocalPlayerID) {
@@ -461,7 +502,6 @@ void Players::ProcessOtherPlayerMovement(PlayerMovementData& playerInfo)
     m_pLocalPlayer->st_PlayerActionsInfo.serverPacketArriveTime = m_DeltaTimeTimePoint;
     m_pLocalPlayer->st_PlayerActionsInfo.lastMovementPacketArriveTime = playerInfo.sv_PacketArriveTime;
     serverUpdatedPlayerPos.setPosition(playerInfo.v_fPos.x, playerInfo.v_fPos.y);
-    
 
     player.st_PlayerActionsInfo.u_PlayerActions = 0;
 }
@@ -481,17 +521,17 @@ void Players::ProcessOtherPlayerActions(PlayerActionsData& playerInfo)
             static Vector2f rayStart{ 0.f, 0.f };
             static Vector2f rayEnd{ 0.f, 0.f };
 
-            rayStart.x = player.st_PlayerMovementInfo.v_fPos.x;
-            rayStart.y = player.st_PlayerMovementInfo.v_fPos.y;
-            rayEnd.x = player.st_PlayerMovementInfo.v_fPos.x + cos(Utils::d2r(player.st_PlayerMovementInfo.rotation)) * g_RayLength;
-            rayEnd.y = player.st_PlayerMovementInfo.v_fPos.y + sin(Utils::d2r(player.st_PlayerMovementInfo.rotation)) * g_RayLength;
+            rayStart = playerInfo.v_fPos;
+            rayEnd.x = playerInfo.v_fPos.x + cos(Utils::d2r(playerInfo.rotation)) * g_RayLength;
+            rayEnd.y = playerInfo.v_fPos.y + sin(Utils::d2r(playerInfo.rotation)) * g_RayLength;
 
             rayEnd = m_Map.GetRayIntersectionPoint(rayStart, rayEnd);
             player.beamBlueprint.setSize(sf::Vector2f(std::sqrt(std::pow(rayEnd.x - rayStart.x, 2) + std::pow(rayEnd.y - rayStart.y, 2)), player.beamBlueprint.getSize().y));
 
-            player.beamBlueprint.setPosition(player.st_PlayerMovementInfo.v_fPos.x, player.st_PlayerMovementInfo.v_fPos.y);
-            player.beamBlueprint.setRotation(player.st_PlayerMovementInfo.rotation);
+            player.beamBlueprint.setPosition(playerInfo.v_fPos.x, playerInfo.v_fPos.y);
+            player.beamBlueprint.setRotation(playerInfo.rotation);
             player.beams.push_back(std::make_pair(player.beamBlueprint, m_clTime.getElapsedTime()));
+            AudioManager::Get().PlayGameSound(GameSounds::PLAYER_SHOOT, m_pLocalPlayer->st_PlayerMovementInfo.v_fPos, player.st_PlayerMovementInfo.v_fPos);
         }
     }
 
@@ -508,6 +548,7 @@ void Players::ProcessOtherPlayerActions(PlayerActionsData& playerInfo)
 void Players::UpdateGameStateVariables(sv_HitregData& hitregInfo)
 {
     auto& player = m_mapPlayers[hitregInfo.n_uID];
+    auto& perpetrator = m_mapPlayers[hitregInfo.n_uPerpetratorID];
 
     if (hitregInfo.u_HitregFlag & (UINT32)FLAGS_HITREG::player_hit) {
         m_bShouldCheckBulletCollision = true;
@@ -518,6 +559,9 @@ void Players::UpdateGameStateVariables(sv_HitregData& hitregInfo)
         lagCompensatedPlayerGhost.setPosition(hitregInfo.v_fPos.x, hitregInfo.v_fPos.y);
         realLocalPlayerGhost.setPosition(m_pLocalPlayer->playerShape.getPosition());
         player.stats.health -= hitregInfo.u_Damage;
+        if (hitregInfo.n_uPerpetratorID == m_LocalPlayerID)
+            AudioManager::Get().PlayGameSound(GameSounds::HIT_FEEDBACK, 100.f);
+        AudioManager::Get().PlayGameSound(GameSounds::PLAYER_HIT, m_pLocalPlayer->st_PlayerMovementInfo.v_fPos, hitregInfo.v_fPos, 70.f);
     }
 }
 
@@ -527,6 +571,7 @@ void Players::HandlePlayerKill(sv_PLayerDiedData& playerStateinfo)
     auto& killerPlayer = m_mapPlayers[playerStateinfo.n_uPerpetratorID];
 
     printf("Player [%s] killed by [%s]\n", killedPlayer.stats.username.c_str(), killerPlayer.stats.username.c_str());
+    Killfeed::Get().AppendKillfeed(m_pLocalPlayer, &killerPlayer, &killedPlayer);
 
     killerPlayer.stats.score += g_KillReward_score;
     LeaderBoard::Get().SortItems();
@@ -534,33 +579,98 @@ void Players::HandlePlayerKill(sv_PLayerDiedData& playerStateinfo)
 
     SetPlayerPos(playerStateinfo.n_uID, playerStateinfo.v_fRespawnPos.x, playerStateinfo.v_fRespawnPos.y);
     killedPlayer.st_PlayerMovementInfo.v_fPos = playerStateinfo.v_fRespawnPos;
+    killedPlayer.stats.hasFlag = false;
     killedPlayer.stats.health = 100;
     killedPlayer.stats.ammo = 30;
-    if (playerStateinfo.n_uPerpetratorID == m_LocalPlayerID)
+    killedPlayer.stats.hasFlag = false;
+
+    AudioManager::Get().PlayGameSound(GameSounds::PLAYER_DIED, m_pLocalPlayer->st_PlayerMovementInfo.v_fPos, killedPlayer.st_PlayerMovementInfo.v_fPos);
+    if (playerStateinfo.n_uPerpetratorID == m_LocalPlayerID) {
         m_pLocalPlayer->stats.ammo += g_KillReward_ammo;
+        AudioManager::Get().PlayGameSound(GameSounds::TANK_KILLED_FEEDBACK, 100.f);
+    }
 }
 
-void Players::HandleStatUdpate(shared::UserCommand* usercmd)
+void Players::HandleStatusUdpate(shared::UserCommand* usercmd)
 {
+    PlayerStruct& affectedPlayer = m_mapPlayers[usercmd->uIDRight];
+
+    //Handle rank change
+    if (usercmd->uUserCommand == shared::UserCmd::SET_RANK)
+    {
+        const char* rankName = shared::RankNames[usercmd->iValue];
+        affectedPlayer.stats.displayName = rankName + affectedPlayer.stats.username;
+        LeaderBoard::Get().UpdateText(&affectedPlayer.stats);
+        if (affectedPlayer.stats.ID == m_LocalPlayerID) {
+            Chat::Get().AppendPlainMessage(sf::Color(24, 205, 237, 255), "You'r rank has changed to %s", rankName);
+            switch ((shared::PlayerRank)usercmd->iValue)
+            {
+            case shared::PlayerRank::OP:
+                Chat::Get().AppendPlainMessage(sf::Color(24, 205, 237, 255), "-={ You Are Now Op! }=-"); break;
+            default:
+                if (affectedPlayer.stats.rank == shared::PlayerRank::OP)
+                    Chat::Get().AppendPlainMessage(sf::Color(24, 205, 237, 255), "-={ You are no longer op. }=-"); break;
+            }
+            g_bNeedUiUpdate = true;
+        }
+        affectedPlayer.stats.rank = (shared::PlayerRank)usercmd->iValue;
+        return;
+    }
+
     switch (usercmd->uUserCommand)
     {
     case shared::UserCmd::ADD_AMMO:
     {
         m_pLocalPlayer->stats.ammo += usercmd->iValue;
-        Chat::Get().AppendPlainMessage(('[' + m_mapPlayers[usercmd->uIDLeft].stats.username + "] added ammo: " + std::to_string(usercmd->iValue)).c_str(), sf::Color(24, 205, 237, 255));
+        Chat::Get().AppendPlainMessage(sf::Color(24, 205, 237, 255), ('[' + m_mapPlayers[usercmd->uIDLeft].stats.displayName + "] added ammo: " + std::to_string(usercmd->iValue)).c_str());
     } break;
     case shared::UserCmd::ADD_HEALTH:
     {
         if (usercmd->uIDRight == m_LocalPlayerID) {
             m_pLocalPlayer->stats.health += usercmd->iValue;
-            Chat::Get().AppendPlainMessage(('[' + m_mapPlayers[usercmd->uIDLeft].stats.username + "] added health: " + std::to_string(usercmd->iValue)).c_str(), sf::Color(24, 205, 237, 255));
+            Chat::Get().AppendPlainMessage(sf::Color(24, 205, 237, 255), ('[' + m_mapPlayers[usercmd->uIDLeft].stats.displayName + "] added health: " + std::to_string(usercmd->iValue)).c_str());
         }
         else {
-            m_mapPlayers[usercmd->uIDRight].stats.health += usercmd->iValue;
+            affectedPlayer.stats.health += usercmd->iValue;
         }
     } break;
 
     default: break;
+    }
+}
+
+void Players::HandleFlagStateChange(MapFlagStatusUpdateData* flagData)
+{
+    PlayerStruct& perpetrator = m_mapPlayers[flagData->n_uID];
+    perpetrator.stats.hasFlag = flagData->flagState == (int8_t)shared::FlagStates::FLAG_STOLEN
+    || perpetrator.stats.hasFlag && flagData->flagState == (int8_t)shared::FlagStates::FLAG_RETURNED;
+
+    switch ((shared::FlagStates)flagData->flagState)
+    {
+    case shared::FlagStates::FLAG_STOLEN:
+        AudioManager::Get().PlayGameSound(GameSounds::FLAG_STOLE, 100.f);
+        break;
+    case shared::FlagStates::FLAG_RETURNED:
+        AudioManager::Get().PlayGameSound(GameSounds::FLAG_RETURN, 100.f);
+        m_Map.SetFlagPosition(perpetrator.stats.team == 1 ? shared::FlagStandPosLeft : shared::FlagStandPosRight, perpetrator.stats.team == 1);    //fuck you
+        break;
+    case shared::FlagStates::FLAG_WIN:
+        AudioManager::Get().PlayGameSound(GameSounds::FLAG_WIN, 100.f);
+        m_Map.SetFlagPosition(perpetrator.stats.team == 1 ? shared::FlagStandPosRight : shared::FlagStandPosLeft, perpetrator.stats.team == 2);
+
+        perpetrator.stats.team == 1 ? ++g_TeamFlagScore : ++g_EnemyFlagScore;
+        g_bNeedUiUpdate = true;
+        break;
+    case shared::FlagStates::FLAG_DROPPED:
+        m_Map.SetFlagPosition(flagData->v_fPos, perpetrator.stats.team == 2);
+        AudioManager::Get().PlayGameSound(GameSounds::FLAG_LOST, 80.f);
+        break;
+    case shared::FlagStates::FLAG_LOST:
+        m_Map.SetFlagPosition(flagData->v_fPos, perpetrator.stats.team == 2);
+        AudioManager::Get().PlayGameSound(GameSounds::FLAG_LOST, 100.f);
+        break;
+    default:
+        break;
     }
 }
 
@@ -576,6 +686,8 @@ void Players::CalcPing(const PlayerMovementData& playerInfo, float RTT)
 
 void Players::draw(sf::RenderTarget& target, const sf::RenderStates states) const
 {
+    m_Map.drawFlags(target);
+
     for (auto& player : m_mapPlayers) { //cpp 17 [k,v] mb cleaner
         target.draw(player.second.playerShape);
         for (auto& bullet : player.second.bullets)

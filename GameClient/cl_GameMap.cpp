@@ -4,21 +4,57 @@
 
 GameMap::GameMap()
 {
+	m_RedFlagTexture.loadFromFile("textures\\flag_red.png");
+	m_RedFlagSprite.setTexture(m_RedFlagTexture);
+	m_RedFlagSprite.setOrigin(m_RedFlagSprite.getGlobalBounds().width / 2.f, m_RedFlagSprite.getGlobalBounds().height);
+	m_RedFlagSprite.setPosition(shared::FlagStandPosLeft.x, shared::FlagStandPosLeft.y);
+
+	m_BlueFlagTexture.loadFromFile("textures\\flag_blue.png");
+	m_BlueFlagSprite.setTexture(m_BlueFlagTexture);
+	m_BlueFlagSprite.setOrigin(m_BlueFlagSprite.getGlobalBounds().width / 2.f, m_BlueFlagSprite.getGlobalBounds().height);
+	m_BlueFlagSprite.setPosition(shared::FlagStandPosRight.x, shared::FlagStandPosRight.y);
+
+	m_RedStandTexture.loadFromFile("textures\\stand_red.png");
+	m_RedStandSprite.setTexture(m_RedStandTexture);
+	m_RedStandSprite.setOrigin(m_RedStandSprite.getGlobalBounds().getSize() / 2.f);
+	m_RedStandSprite.setPosition(shared::FlagStandPosLeft.x, shared::FlagStandPosLeft.y);
+
+	m_BlueStandTexture.loadFromFile("textures\\stand_blue.png");
+	m_BlueStandSprite.setTexture(m_BlueStandTexture);
+	m_BlueStandSprite.setOrigin(m_BlueStandSprite.getGlobalBounds().getSize() / 2.f);
+	m_BlueStandSprite.setPosition(shared::FlagStandPosRight.x, shared::FlagStandPosRight.y);
+
 	sf::RectangleShape objectBlueprint;
-	objectBlueprint.setSize(sf::Vector2f(50.f, 200.f));
-	objectBlueprint.setPosition(500.f, 300.f);
+	objectBlueprint.setSize(sf::Vector2f(50.f, 600.f));
+	objectBlueprint.setPosition(250.f, 200.f);
 	objectBlueprint.setFillColor(sf::Color(7, 151, 240, 255));
 	m_vObjects.push_back(objectBlueprint);
 
-	objectBlueprint.setSize(sf::Vector2f(50.f, 200.f));
-	objectBlueprint.setPosition(590.f, 300.f);
+	objectBlueprint.setSize(sf::Vector2f(50.f, 600.f));
+	objectBlueprint.setPosition(1620.f, 200.f);
 	objectBlueprint.setFillColor(sf::Color(7, 151, 240, 255));
 	m_vObjects.push_back(objectBlueprint);
 
-	objectBlueprint.setSize(sf::Vector2f(50.f, 200.f));
-	objectBlueprint.setPosition(500.f, 500.f);
-	objectBlueprint.setFillColor(sf::Color(10, 110, 210, 255));
+	objectBlueprint.setSize(sf::Vector2f(300.f, 300.f));
+	objectBlueprint.setPosition(600.f, 0.f);
+	objectBlueprint.setFillColor(sf::Color(7, 151, 240, 255));
 	m_vObjects.push_back(objectBlueprint);
+
+	objectBlueprint.setSize(sf::Vector2f(300.f, 300.f));
+	objectBlueprint.setPosition(800.f, 780.f);
+	objectBlueprint.setFillColor(sf::Color(7, 151, 240, 255));
+	m_vObjects.push_back(objectBlueprint);
+
+	objectBlueprint.setSize(sf::Vector2f(300.f, 40.f));
+	objectBlueprint.setPosition(760.f, 530.f);
+	objectBlueprint.setFillColor(sf::Color(7, 151, 240, 255));
+	m_vObjects.push_back(objectBlueprint);
+
+	objectBlueprint.setSize(sf::Vector2f(300.f, 40.f));
+	objectBlueprint.setPosition(760.f, 610.f);
+	objectBlueprint.setFillColor(sf::Color(7, 151, 240, 255));
+	m_vObjects.push_back(objectBlueprint);
+
 }
 
 GameMap::~GameMap()
@@ -29,6 +65,12 @@ void GameMap::ArrangePlayerCollision(Vector2f& playerPos)	//bug at two wall inte
 {
 	DoPlayerWallCollision(playerPos);
 	DoPlayerMapBorderCollsion(playerPos);
+}
+
+void GameMap::SetFlagPosition(Vector2f pos, bool red_blue)
+{
+	sf::Sprite& flagSprite = red_blue ? m_RedFlagSprite : m_BlueFlagSprite;
+	flagSprite.setPosition(pos.x, pos.y);
 }
 
 Vector2f GameMap::GetRayIntersectionPoint(Vector2f rayStart, Vector2f rayEnd)
@@ -50,6 +92,14 @@ void GameMap::draw(sf::RenderTarget& target, const sf::RenderStates states) cons
 	for (auto& object : m_vObjects) {
 		target.draw(object);
 	}
+}
+
+void GameMap::drawFlags(sf::RenderTarget& target) const
+{
+	target.draw(m_RedStandSprite);
+	target.draw(m_BlueStandSprite);
+	target.draw(m_RedFlagSprite);
+	target.draw(m_BlueFlagSprite);
 }
 
 void GameMap::DoPlayerWallCollision(Vector2f& playerPos)

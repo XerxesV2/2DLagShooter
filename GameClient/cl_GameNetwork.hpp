@@ -17,8 +17,11 @@ public:
 	void ProcessIncomingPackets();
 	void SendPlayerStatusFixedRate();
 	void SendLoginInformation(shared::LoginInformation& inf);
+	void SendAutoLoginInformation(shared::LoginInformation& inf);
 	void RegisterClient();
+	void UnRegisterClient();
 	GameMessages WaitForLoginReply();
+	const long long GetBanTime() const { return m_BanTime; };
 
 	bool ConnectToServer();
 	bool Connected() { return IsConnected(); }
@@ -29,7 +32,9 @@ public:
 	void AddPlayerStateToPacketBufferOnTick();
 	void TakePlayerActionSnapShot();
 	void SendChatMessage(const char * msg, const size_t size);
+	void SendPrivateChatMessage(const char * msg, const size_t size, const uint32_t id);
 	void SendChatUserCommand(const shared::UserCommand& usercmd);
+	void PushFlagDropAction();
 
 private:
 	void SendChecksum();
@@ -45,11 +50,13 @@ private:
 
 	bool m_bLocalPlayerAdded{ false };
 	bool m_bAccepted{ false };
+	long long m_BanTime{ 0 };
 
 	const double targetFrameTime = 1.0 / clientUpdateRate;
 	double previousTime = 0.0;
 	double lagTime = 0.0;
 
-	net::packet<GameMessages> m_GameStatePacket;
+	net::udpPacket<GameMessages> m_UdpGameStatePacket;
+	net::packet<GameMessages> m_TcpGameStatePacket;
 };
 

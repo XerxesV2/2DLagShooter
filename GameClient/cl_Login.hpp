@@ -13,8 +13,10 @@ public:
 
 private:
 	void HandleEvents();
+	void TryToLogIn();
 	void DrawFrame();
 	void SetString(sf::Text& text, std::string_view str);
+	const char* GetHWID();
 
 private:
 	sf::RenderWindow& m_Window;
@@ -30,5 +32,6 @@ private:
 	shared::LoginInformation m_LoginInfo;
 
 	bool m_bWaitForLoginResult = false;
+	bool m_bAutoLoginSuccess = false;
 };
 

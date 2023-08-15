@@ -20,8 +20,13 @@ void LeaderBoard::Init(sf::Font* font)
 	m_TextBlueprint.setString("NONE");
 
 	m_Background.setSize(sf::Vector2f(600.f, 100.f));
-	m_Background.setPosition(g_CamSizeX - m_Background.getSize().x, 0.f);
+	m_Background.setPosition(g_CamSizeX / 2.f - m_Background.getSize().x / 2.f, 100.f);
 	m_Background.setFillColor(sf::Color(255, 255, 255, 50));
+}
+
+void LeaderBoard::Reset()
+{
+	m_Items.clear();
 }
 
 void LeaderBoard::AddNewItem(PlayerStatsStruct* ps)
@@ -59,8 +64,8 @@ void LeaderBoard::UpdateText(PlayerStatsStruct* ps)
 		auto& item = m_Items.at(i);
 		item.text.setPosition(m_Background.getGlobalBounds().left, m_Background.getGlobalBounds().top + m_fTextHeight * (float)i);
 		//if(item.ps == ps)
-			//item.text.setString(std::to_string(i+1) + " " + ps->username + " " + std::to_string(ps->score));
-		item.text.setString(std::to_string(i + 1) + ". " + item.ps->username + ": " + std::to_string(item.ps->score));	//oof
+			//item.text.setString(std::to_string(i+1) + " " + ps->displayName + " " + std::to_string(ps->score));
+		item.text.setString(std::to_string(i + 1) + ". " + item.ps->displayName + ": " + std::to_string(item.ps->score));	//oof
 	}
 
 	//auto it = std::find(m_Items.begin(), m_Items.end(), ps);
@@ -69,6 +74,8 @@ void LeaderBoard::UpdateText(PlayerStatsStruct* ps)
 
 void LeaderBoard::draw(sf::RenderTarget& target, const sf::RenderStates states) const
 {
+	if (!sf::Keyboard::isKeyPressed(sf::Keyboard::Tab)) return;
+
 	target.draw(m_Background);
 	for (auto& item : m_Items)
 	{

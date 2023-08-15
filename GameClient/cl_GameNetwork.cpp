@@ -42,6 +42,18 @@ void GameNetwork::ProcessIncomingPackets()
                     break;
                 }
 
+                case GameMessages::WorldState: {
+                    static WorldData* worldData;
+                    worldData = pkt.GetSubPacketPtr<WorldData>();
+                    g_TeamFlagScore = worldData->i_TeamOneScore;
+                    g_EnemyFlagScore = worldData->i_TeamTwoScore; //m_pPlayers->GetLocalPLayerStat()->team == 1 ? worldData->i_TeamOneScore : worldData->i_TeamTwoScore;
+                    g_bNeedUiUpdate = true;
+
+                    m_pPlayers->GetMap().SetFlagPosition(worldData->v_fTeamOneFlagPos, true);
+                    m_pPlayers->GetMap().SetFlagPosition(worldData->v_fTeamTwoFlagPos, false);
+                    break;
+                }
+
                 case GameMessages::RemovePlayer: {
                     uint32_t* idToRemove;
                     idToRemove = pkt.GetSubPacketPtr<uint32_t>();
@@ -99,6 +111,14 @@ void GameNetwork::ProcessIncomingPackets()
                     m_pPlayers->UpdateGameStateVariables(*sHitreg);
                     break;
                 }
+                case GameMessages::FlagStateUpdate:
+                {
+                    MapFlagStatusUpdateData* flagData;
+                    flagData = pkt.GetSubPacketPtr<MapFlagStatusUpdateData>();
+                    m_pPlayers->HandleFlagStateChange(flagData);
+                    break;
+                } 
+
                 case GameMessages::PlayerDied:
                 {
                     sv_PLayerDiedData* sPlayerData;
@@ -116,25 +136,37 @@ void GameNetwork::ProcessIncomingPackets()
                     chatMsgData = pkt.GetSubPacketPtr<ChatMessageData>();
 
                     if(chatMsgData->n_uID != 1)
-                        Chat::Get().AppendMessage(m_pPlayers->GetPLayerById(chatMsgData->n_uID), chatMsgData->msg);
+                        Chat::Get().AppendMessage(m_pPlayers->GetPLayerById(chatMsgData->n_uID), chatMsgData);
                     else
-                        Chat::Get().AppendMessage(nullptr, chatMsgData->msg);
+                        Chat::Get().AppendMessage(nullptr, chatMsgData);
 
                 }break;
-                case GameMessages::UpdateStats:
+                case GameMessages::UpdateStatus:
                 {
                     shared::UserCommand* userCmdData;
                     userCmdData = pkt.GetSubPacketPtr<shared::UserCommand>();
-                    m_pPlayers->HandleStatUdpate(userCmdData);
+                    m_pPlayers->HandleStatusUdpate(userCmdData);
 
                 }break;
+                case GameMessages::ServerPing:
+                {
+                    SendTcpPacket(pkt);
+                }break;
+                case GameMessages::Disconnect:
+                {
+                    Disconnect();
+                }break;
+                
                 default: printf("\nWrong tcp packet data type!\n");
             }
         }
     }
 
     while (!IncomingUdpPackets().Empty()) {
-        auto pkt = IncomingUdpPackets().PopFront().pkt;
+
+        //if (IncomingUdpPackets().Front().second > g_CurrentTime) break;
+
+        auto pkt = IncomingUdpPackets().PopFront().first.pkt;
 
         while (pkt.bytesRead < pkt.body.size())
         {
@@ -147,6 +179,10 @@ void GameNetwork::ProcessIncomingPackets()
                 //static PlayerStruct sPlayer;
                 PlayerMovementData* movementInfo;
                 movementInfo = pkt.GetSubPacketPtr<PlayerMovementData>();
+                if (movementInfo == nullptr) {
+                    printf("movementInfo was nullptr!\n");
+                    break;
+                }
 
                 if (movementInfo->n_uID == m_pPlayers->GetLocalPLayerId()) { //local player
                     if (m_mapPacketsToVerify.empty()) break;
@@ -208,10 +244,19 @@ void GameNetwork::SendPlayerStatusFixedRate()
     {
         //AddPlayerStateToPacketBufferOnTick();
 
-        m_GameStatePacket.header.sendTime = std::chrono::duration_cast<std::chrono::duration<float>>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
-        if (!m_GameStatePacket.body.empty()) SendUdpPacket(m_GameStatePacket), ++m_uSequenceNumber;
+        m_UdpGameStatePacket.header.sendTime = std::chrono::duration_cast<std::chrono::duration<float>>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 
-        m_GameStatePacket.Clear();
+        if (!m_UdpGameStatePacket.body.empty())
+        {
+            m_UdpGameStatePacket.header.id = m_pPlayers->GetLocalPLayerId();
+            m_UdpGameStatePacket.AddHeaderToBody();
+            SendUdpPacket(m_UdpGameStatePacket), ++m_uSequenceNumber;
+        }
+
+        if (!m_TcpGameStatePacket.body.empty()) SendTcpPacket(m_TcpGameStatePacket);
+
+        m_UdpGameStatePacket.Clear();
+        m_TcpGameStatePacket.Clear();
 
         lagTime = 0.0;
     }
@@ -226,10 +271,25 @@ void GameNetwork::SendLoginInformation(shared::LoginInformation& inf)
     SendTcpPacket(loginPkt);
 }
 
+void GameNetwork::SendAutoLoginInformation(shared::LoginInformation& inf)
+{
+    net::packet<GameMessages> loginPkt;
+    loginPkt << GameMessages::AutoLogin;
+    loginPkt << inf;
+    SendTcpPacket(loginPkt);
+}
+
 void GameNetwork::RegisterClient()
 {
     net::packet<GameMessages> pkt;
     pkt << GameMessages::RegisterClient;
+    SendTcpPacket(pkt);
+}
+
+void GameNetwork::UnRegisterClient()
+{
+    net::packet<GameMessages> pkt;
+    pkt << GameMessages::Disconnect;
     SendTcpPacket(pkt);
 }
 
@@ -266,12 +326,29 @@ GameMessages GameNetwork::WaitForLoginReply()
                 break;
             }
             case GameMessages::AssignUdpPort: {
-                uint16_t* port;
-                port = pkt.GetSubPacketPtr<uint16_t>();
-                SetUdp(*port);
-                std::cout << "UDP port assigned: " << *port << "\n";
+                uint16_t* rec_port;
+                uint16_t* send_port;
+                rec_port = pkt.GetSubPacketPtr<uint16_t>();
+                send_port = pkt.GetSubPacketPtr<uint16_t>();
+                SetUdp(*rec_port, *send_port);
+                std::cout << "UDP Receive port: " << *rec_port << "\n";
+                std::cout << "UDP Send port: " << *send_port << "\n";
                 break;
             }
+            case GameMessages::AutoLoginFail: {
+                return GameMessages::AutoLoginFail;
+            }break;
+            case GameMessages::AutoLoginSuccess: {
+                return GameMessages::AutoLoginSuccess;
+            }break;
+            case GameMessages::BannedClient:
+            {
+                m_BanTime = *pkt.GetSubPacketPtr<long long>();
+                return GameMessages::BannedClient;
+            }break;
+            case GameMessages::MysteriousError: {
+                return GameMessages::MysteriousError;
+            }break;
             default: printf("\n[LOGIN] Wrong tcp packet data type!"); break;
             }
         }
@@ -281,10 +358,12 @@ GameMessages GameNetwork::WaitForLoginReply()
 }
 
 bool GameNetwork::ConnectToServer() {
-    if (!Connect("127.0.0.1", 6969)) {
+    if (!Connect("127.0.0.1", 6969)) {  //6969 127.0.0.1
         std::cout << "Server is down\n";
         return EXIT_FAILURE;
     }
+    while (!IsConnected()) {}
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
     SendChecksum();
 }
 
@@ -298,16 +377,16 @@ void GameNetwork::AddPlayerStateToPacketBufferOnFrame()
         localPlayer->st_PlayerMovementInfo.n_uSequence = m_uSequenceNumber;
         localPlayer->st_PlayerMovementInfo.deltaTime = m_fDeltaTime;
 
-        m_GameStatePacket << GameMessages::UpdatePlayerMovement;
-        m_GameStatePacket << localPlayer->st_PlayerMovementInfo;
+        m_UdpGameStatePacket << GameMessages::UpdatePlayerMovement;
+        m_UdpGameStatePacket << localPlayer->st_PlayerMovementInfo;
 
         localPlayer->st_PlayerMovementInfo.u_PlayerActions = 0;
     }
 
     if (m_OnFramePlayerActionsInfo.u_PlayerActions != 0) {
 
-        m_GameStatePacket << GameMessages::UpdatePlayerActions;
-        m_GameStatePacket << m_OnFramePlayerActionsInfo;
+        m_UdpGameStatePacket << GameMessages::UpdatePlayerActions;
+        m_UdpGameStatePacket << m_OnFramePlayerActionsInfo;
         m_OnFramePlayerActionsInfo.u_PlayerActions = 0;
     }
 }
@@ -330,6 +409,21 @@ void GameNetwork::SendChatMessage(const char* msg, const size_t size)
     ChatMessageData chatMsgData;
     chatMsgData.n_uID = m_pPlayers->GetLocalPLayerId();
     std::memcpy(chatMsgData.msg, msg, size);
+    chatMsgData.fMsgFlags = (BYTE)FLAGS_CHATMSG::client_msg;
+
+    net::packet<GameMessages> msg_pkt;
+    msg_pkt << GameMessages::ChatMessage;
+    msg_pkt << chatMsgData;
+    SendTcpPacket(msg_pkt);
+}
+
+void GameNetwork::SendPrivateChatMessage(const char* msg, const size_t size, const uint32_t id)
+{
+    ChatMessageData chatMsgData;
+    chatMsgData.n_uID = m_pPlayers->GetLocalPLayerId();
+    std::memcpy(chatMsgData.msg, msg, size);
+    chatMsgData.fMsgFlags = (BYTE)FLAGS_CHATMSG::private_msg;
+    chatMsgData.n_uID = id;
 
     net::packet<GameMessages> msg_pkt;
     msg_pkt << GameMessages::ChatMessage;
@@ -343,6 +437,18 @@ void GameNetwork::SendChatUserCommand(const shared::UserCommand& usercmd)
     msg_pkt << GameMessages::ChatCommand;
     msg_pkt << usercmd;
     SendTcpPacket(msg_pkt);
+}
+
+void GameNetwork::PushFlagDropAction()
+{
+    if (!m_pPlayers->GetLocalPLayerStat()->hasFlag) return;
+    m_pPlayers->GetLocalPLayer()->stats.hasFlag = false;
+    MapFlagStatusUpdateData flagData;
+    flagData.n_uID = m_pPlayers->GetLocalPLayerId();
+    flagData.flagState = (int8_t)shared::FlagStates::FLAG_DROPPED;
+    flagData.v_fPos = { 0.f,0.f };  //unused
+    m_TcpGameStatePacket << GameMessages::FlagStateUpdate;
+    m_TcpGameStatePacket << flagData;
 }
 
 void GameNetwork::SendChecksum()

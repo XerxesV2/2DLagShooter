@@ -6,12 +6,15 @@
 struct PlayerStatsStruct
 {
     std::string username;
+    std::string displayName;
     float ping;
     int health = 0;
     int score = 0;
     uint32_t ammo;
     uint32_t ID;
-    bool teammate;
+    int8_t team = -1;
+    bool hasFlag = false;
+    shared::PlayerRank rank;
 };
 
 struct PlayerStruct
@@ -30,4 +33,5 @@ struct PlayerStruct
 
     PlayerMovementData st_PlayerMovementInfo;
     PlayerActionsData st_PlayerActionsInfo;
+    Vector2f dirVec;
 };

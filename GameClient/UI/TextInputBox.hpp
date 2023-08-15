@@ -46,7 +46,7 @@ public:
 
 	void SetUnicodeBounds(uint32_t lower, uint32_t upper);
 
-	void Clear() { m_Str.clear(); m_Text.setString(""); }
+	void Clear() { m_Str.clear(); m_Text.setString(""); m_PressedKeyCodes.clear(); }
 
 	void draw(sf::RenderTarget& target, const sf::RenderStates states = sf::RenderStates::Default) const override;
 

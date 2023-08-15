@@ -11,6 +11,7 @@ public:
 	~LeaderBoard();
 
 	void Init(sf::Font* font);
+	void Reset();
 
 	void UpdateText(PlayerStatsStruct* ps);
 	void AddNewItem(PlayerStatsStruct* ps); //maybe change later so if a player exits its stays on the board until the match ends

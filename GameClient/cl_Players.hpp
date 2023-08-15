@@ -1,12 +1,13 @@
 #pragma once
 #include "cl_GameMap.hpp"
-#include <SFML/Graphics.hpp>
-
 #include "PacketStruct.hpp"
 #include "stdIncludes.hpp"
 #include "utils.hpp"
 #include "PlayerStruct.hpp"
 #include "cl_Globals.hpp"
+#include "AudioManager.hpp"
+
+#include <SFML/Graphics.hpp>
 
 class Players : public sf::Drawable
 {
@@ -25,10 +26,12 @@ public:
     void ProcessOtherPlayerActions(PlayerActionsData& playerInfo);
     void UpdateGameStateVariables(sv_HitregData& hitregInfo);
     void HandlePlayerKill(sv_PLayerDiedData& playerStateinfo);
-    void HandleStatUdpate(shared::UserCommand* usercmd);
+    void HandleStatusUdpate(shared::UserCommand* usercmd);
+    void HandleFlagStateChange(MapFlagStatusUpdateData* flagData);
     void CalcPing(const PlayerMovementData& playerInfo, float RTT);
 
     const bool ShouldSendPacket() const { return m_bShouldSendPacket; }
+    GameMap& GetMap() { return m_Map; }
     PlayerStruct* const GetLocalPLayer() const { return m_pLocalPlayer; }
     PlayerStruct* const GetPLayerById(const uint32_t id) { return &m_mapPlayers[id]; }
     const PlayerStatsStruct* GetLocalPLayerStat() const { return &m_pLocalPlayer->stats; }
@@ -39,6 +42,8 @@ public:
 
     /* Options */
     void EnableInterpolation();
+    void ChangeMouseRelative();
+    void SetMouseMoved(bool moved) { m_bMouseMoved = moved; }
 
 private:
     void UpdateLocalPlayer();
@@ -90,10 +95,11 @@ private:
     bool m_bShouldCheckBulletCollision{ false };
     bool m_bRecalcInterpolationSpeed{ true };
     bool m_bInterpolate{ true };
+    bool m_bRelativeMouse{ true };
+    bool m_bMouseMoved{ true };
 
     float m_fBeamDuration = 1.f;
     float m_fBeamFadeTime = 2.f;
-    float m_fFireRate = 0.5f;
     static constexpr float m_fSpeed = 400.f;
     static constexpr float m_fBulletSpeed = 500.f;
     static constexpr float m_fPlayerRadius = 20.f;

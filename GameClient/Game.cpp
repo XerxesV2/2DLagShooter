@@ -15,7 +15,15 @@ bool AlreadyRunning(const char* processName)
     while (Process32Next(hProcSnap, &procEntry32))
     {
         if (procEntry32.th32ProcessID == GetCurrentProcessId()) continue;
+#ifdef _WIN64
+        static char szstr[256];
+        ZeroMemory(szstr, 256);
+        size_t unused;
+        wcstombs_s(&unused, szstr, procEntry32.szExeFile, 256);
+        if (!strcmp(processName, szstr))
+#else
         if (!strcmp(processName, procEntry32.szExeFile))
+#endif
         {
             CloseHandle(hProcSnap);
             return true;
@@ -27,7 +35,7 @@ bool AlreadyRunning(const char* processName)
     return false;
 }
 
-Game::Game() : window(sf::VideoMode(1920, 1080), "gamegame")
+Game::Game() : window(sf::VideoMode(1920, 1080), "XerxesGames")
 {
     if (AlreadyRunning("GameClient.exe")) window.setPosition(sf::Vector2i(1920, 0));
     else window.setPosition(sf::Vector2i(0, 0));
@@ -38,6 +46,7 @@ Game::Game() : window(sf::VideoMode(1920, 1080), "gamegame")
 
     LogSystem::Get().Init(&this->window, &m_fDeltaTime);
     LeaderBoard::Get().Init(&m_Font);
+    Killfeed::Get().Init(&this->window, &m_fDeltaTime);
 
     window.setFramerateLimit(60);
     m_Font.loadFromFile("C:\\Windows\\Fonts\\Arial.ttf");
@@ -73,18 +82,7 @@ bool Game::Connect()
 
 void Game::MainLoop()
 {
-    Connect();
-
-    if (m_pLogin->MainLoop()) return;
-    m_pGameNetwork->RegisterClient();
-
-    while(!m_pGameNetwork->LocalPlayerAdded() && !g_bOfflinePLay)
-    {
-        m_pGameNetwork->ProcessIncomingPackets();
-    }
-
-    m_pUI->Init(m_pPlayers->GetLocalPLayerStat());
-    Chat::Get().Init(&window, m_pPlayers->GetLocalPLayer(), m_pGameNetwork, &m_fDeltaTime, &m_PressedKeyCodes);
+    Startup();
 
     while (window.isOpen())
     {
@@ -94,19 +92,64 @@ void Game::MainLoop()
     }
 }
 
+void Game::Startup()
+{
+    Connect();
+
+    if (m_pLogin->MainLoop()) return;
+    m_pGameNetwork->RegisterClient();
+
+    while (!m_pGameNetwork->LocalPlayerAdded() && !g_bOfflinePLay)
+    {
+        m_pGameNetwork->ProcessIncomingPackets();
+    }
+
+    AudioManager::Get().PlayGameSound(GameSounds::JOIN, 60.f);
+    AudioManager::Get().PlayGameMusic(GameMusics::INGAME, 20.f);
+    m_pUI->Init(m_pPlayers->GetLocalPLayerStat());
+    Chat::Get().Init(&window, m_pPlayers->GetLocalPLayer(), m_pGameNetwork, &m_fDeltaTime, &m_PressedKeyCodes);
+}
+
+void Game::Disconnected()
+{
+    if (!window.isOpen()) return;
+    LeaderBoard::Get().Reset();
+    Chat::Get().Reset();
+
+    m_pPlayers.reset();
+    m_pUI.reset();
+    m_pGameNetwork.reset();
+
+    m_pPlayers = std::make_shared<Players>(window, m_Font, m_fDeltaTime);
+    m_pGameNetwork = std::make_shared<GameNetwork>(m_pPlayers, m_fDeltaTime);
+    m_pUI = std::make_shared<UI>(&window);
+
+    Startup();
+}
+
 void Game::UpdateClient()
 {
-    if (m_bGameOver) return;
-
-    if(!g_bOfflinePLay) m_pGameNetwork->ProcessIncomingPackets();
+    if (!m_pGameNetwork->IsConnected()) {
+        Disconnected();
+        return;
+    }
 
     m_fDeltaTime = m_DeltaClock.restart().asSeconds();  //needs to be cloese to each other bc the server interpolation
-    m_pPlayers->m_DeltaTimeTimePoint = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    g_CurrentTime = std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+    m_pPlayers->m_DeltaTimeTimePoint = g_CurrentTime;
     //std::cout << "deltaTime: " << m_fDeltaTime << '\n';
-    
+
+    if (!g_bOfflinePLay) m_pGameNetwork->ProcessIncomingPackets();
+
+    AudioManager::Get().Update();
     Chat::Get().Update();
     m_pPlayers->Update();
     m_pUI->Update();
+    if (g_bNeedUiUpdate) {
+        m_pUI->UpdateName(); 
+        m_pUI->UpdateFlagScore(); 
+        g_bNeedUiUpdate = false;
+    }
     if(!g_bOfflinePLay) m_pGameNetwork->SendPlayerStatusFixedRate();
 }
 
@@ -132,7 +175,12 @@ void Game::HandleEvents()
     {
         switch (event.type)
         {
-        case sf::Event::Closed: window.close(); break;
+        case sf::Event::Closed: m_pGameNetwork->UnRegisterClient(); window.close(); break;
+        case sf::Event::MouseMoved:
+        {
+            //m_pPlayers->SetMouseMoved(true);
+            break;
+        }
         case sf::Event::KeyPressed:
             {
                 switch (event.key.code)
@@ -146,6 +194,8 @@ void Game::HandleEvents()
                 switch (event.key.code)
                 {
                 case sf::Keyboard::I: m_pPlayers->EnableInterpolation(); break;
+                case sf::Keyboard::C: m_pGameNetwork->PushFlagDropAction(); break;
+                case sf::Keyboard::R: m_pPlayers->ChangeMouseRelative(); break;
                 default: break;
                 }
             }break;
