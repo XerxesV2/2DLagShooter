@@ -13,6 +13,7 @@ struct PlayerRecord
 	double d_ServerTimePoint;
 	double d_ClientTimePoint;
 	Vector2f Pos;
+	float rotation;
 };
 
 struct PlayerObjects
@@ -31,7 +32,24 @@ struct PacketInfo
 
 struct PlayerInfo
 {
+	uint32_t u_id;
+	uint32_t u_gid;
 	std::string s_Username;
+	std::string s_Hwid;
+	shared::PlayerRank rank;
+	int8_t team = -1;
+};
+
+struct PlayerStatistic
+{
+	int health;
+	int ammo;
+	int score;
+};
+
+struct PlayerStates
+{
+	bool b_HasFlag = false;
 };
 
 struct GameState
@@ -44,7 +62,6 @@ struct GameState
 	PlayerObjects playerObjects;
 	Vector2f rayStart;
 	Vector2f rayEnd;
-	int health;
-	int ammo;
-	int score;
+	PlayerStatistic stats;
+	PlayerStates state;
 };

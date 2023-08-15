@@ -32,7 +32,8 @@ void LagCompensation::UpdatePlayerLagRecord(GameState& gameState)
 	if (gameState.playerObjects.records.empty() || gameState.playerObjects.records.back().Pos != gameState.playerMovementData.v_fPos) {
 		gameState.playerObjects.records.push_back({ gameState.packetInfo.sv_PacketArriveTime,
 													gameState.packetInfo.cl_PacketDispatchTime,
-													gameState.playerMovementData.v_fPos });
+													gameState.playerMovementData.v_fPos,
+													gameState.playerMovementData.rotation });
 	}
 }
 
@@ -85,6 +86,7 @@ void LagCompensation::Start(const uint32_t playerId, const uint32_t otherPlayerI
 		if (behindClosestRecord) {
 			if (m_bLagCompInterP) {
 				otherPlayerGameState.playerMovementData.v_fPos = DetermineClientViewInterpolation(behindClosestRecord->Pos, closestRecord->Pos);
+				otherPlayerGameState.playerMovementData.rotation = closestRecord->rotation;
 #ifdef DEBUG
 				printf("Determined interpolation time is: %fms\n", m_ClientInterpolationTime);
 				printf("playerActionTime %f\n", playerGameState.playerActionsData.playerActionTime);
@@ -95,6 +97,7 @@ void LagCompensation::Start(const uint32_t playerId, const uint32_t otherPlayerI
 		}
 		else {
 			otherPlayerGameState.playerMovementData.v_fPos = closestRecord->Pos;
+			otherPlayerGameState.playerMovementData.rotation = closestRecord->rotation;
 #ifdef DEBUG 
 			printf("No record behind this one. Compensation results might be inaccurate!\n");
 #endif
@@ -111,6 +114,7 @@ void LagCompensation::Start(const uint32_t playerId, const uint32_t otherPlayerI
 void LagCompensation::End(GameState& otherPlayerGameState)
 {
 	otherPlayerGameState.playerMovementData.v_fPos = otherPlayerGameState.playerObjects.records.back().Pos;	//restore player position
+	otherPlayerGameState.playerMovementData.rotation = otherPlayerGameState.playerObjects.records.back().rotation;	//restore player rotation
 }
 
 void LagCompensation::Finish(GameState& playerGameState)

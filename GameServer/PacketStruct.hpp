@@ -1,49 +1,6 @@
 #pragma once
 #include "SharedVariables.hpp"
 
-struct Vector2f
-{
-	Vector2f() = default;
-	Vector2f(float _x, float _y) : x(_x), y(_y) {}
-
-	float x;
-	float y;
-
-	bool operator == (const Vector2f& rhs) {
-		return x == rhs.x && y == rhs.y;
-	}
-
-	bool operator != (const Vector2f& rhs) {
-		return x != rhs.x || y != rhs.y;
-	}
-
-	Vector2f operator + (const Vector2f&& rhs) {
-		return Vector2f(x + rhs.x, y + rhs.y);
-	}
-	Vector2f operator + (const Vector2f& rhs) {
-		return Vector2f(x + rhs.x, y + rhs.y);
-	}
-
-	Vector2f operator - (const Vector2f&& rhs) {
-		return Vector2f(x - rhs.x, y - rhs.y);
-	}
-	Vector2f operator - (const Vector2f& rhs) {
-		return Vector2f(x - rhs.x, y - rhs.y);
-	}
-
-	Vector2f operator * (const float&& rhs) {
-		return Vector2f(x * rhs, y * rhs);
-	}
-	Vector2f operator * (const float& rhs) {
-		return Vector2f(x * rhs, y * rhs);
-	}
-
-	void operator += (const Vector2f& rhs) {
-		x += rhs.x;
-		y += rhs.y;
-	}
-};
-
 enum class PLAYER_ACTION : unsigned int
 {
 	move_left		= 1 << 0,
@@ -65,6 +22,14 @@ enum class FLAGS_HITREG : unsigned int
 {
 	player_hit		= 1 << 0,
 	player_hit_ray	= 1 << 1,
+};
+
+enum class FLAGS_CHATMSG : unsigned char
+{
+	server_msg		,
+	client_msg		,
+	private_msg		,
+	moderate_msg	,
 };
 
 //#pragma pack(push, 1)
@@ -90,7 +55,19 @@ struct AddPlayerData
 	unsigned int n_uID;
 	char sz_Unsername[20]{0};
 	int score = 0;
+	unsigned char rank;
+	signed char team = -1;
+	bool b_HasFlag = false;
+	bool b_WasInGame = false;
 	Vector2f v_fPos;
+};
+
+struct WorldData
+{
+	int i_TeamOneScore = 0;
+	int i_TeamTwoScore = 0;
+	Vector2f v_fTeamOneFlagPos;
+	Vector2f v_fTeamTwoFlagPos;
 };
 
 struct PlayerActionsData
@@ -102,17 +79,29 @@ struct PlayerActionsData
 	float lastMovementPacketArriveTime;
 
 	unsigned int u_PlayerActions{ 0 };
+
+	Vector2f v_fPos;
+	float rotation;
 };
 
 struct ChatMessageData
 {
 	unsigned int n_uID;
+	unsigned char fMsgFlags = 0;
 	char msg[maxChatMessageLength] = {0};
+};
+
+struct MapFlagStatusUpdateData
+{
+	unsigned int n_uID;
+	signed char flagState;
+	Vector2f v_fPos;
 };
 
 struct sv_HitregData
 {
 	unsigned int n_uID;
+	unsigned int n_uPerpetratorID;
 
 	unsigned int u_Damage;
 	unsigned int u_HitregFlag;

@@ -1,5 +1,5 @@
 #pragma once
-
+#include <string>
 extern struct Vector2f;
 
 struct Rect
@@ -20,4 +20,7 @@ namespace Utils
     bool LineCircleCollide(float x1, float y1, float x2, float y2, float cx, float cy, float r, Vector2f& intersect);
     bool LineRect(float x1, float y1, float x2, float y2, float rx, float ry, float rw, float rh, Vector2f& intersection);
     bool lineLine(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, Vector2f& intersection);
+    std::string TimeToString(long long currentTime);
+    std::string CurrentTimeToString();
+    std::string CurrentTimeToShortString();
 }

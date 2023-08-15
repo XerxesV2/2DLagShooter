@@ -15,7 +15,6 @@ class PlayerProperies
 {
 protected:
 	static constexpr float m_fExpectedPlayerSpeed = 400.f;
-	static constexpr float m_fExpectedPlayerReloadTime = 0.5f;
 	static constexpr float m_fPlayerRadius = 20.f;
 	static constexpr float m_fBulletSpeed = 500.f;
 	static constexpr float m_fPlayerMaxHealth = 100.f;
@@ -31,7 +30,7 @@ public:
 	~Player();
 
 	void SetClient(std::shared_ptr<net::ServerConnection<GameMessages>>& tcpClient);
-	std::shared_ptr<net::ServerConnection<GameMessages>> GetTcpClient();
+	const std::shared_ptr<net::ServerConnection<GameMessages>>& GetTcpClient() { return m_TcpClient; }
 
 	void Udpate(std::unordered_map<uint32_t, std::shared_ptr<Player>>& mapPayers);
 
@@ -46,6 +45,7 @@ private:
 	uint32_t CalcDamageAmount(GameState& hitPlayerGameState, Vector2f rayIntersectionPoint);
 	void PreCalcShotRay(GameState& playerGameState);
 	void SimulateBullets(const uint32_t playerId, GameState& playerGameState);
+	void CheckIfPlayerResponding();
 
 private:
 	const uint32_t m_id;

@@ -4,6 +4,11 @@
 #include <math.h>
 #include <cmath>
 #include <stdio.h>
+#include <ctime>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+
 namespace Utils
 {
     float d2r(float d) { return (d / 180.0f) * ((float)M_PI); }
@@ -123,5 +128,49 @@ namespace Utils
             return true;
         }
         return false;
+    }
+
+    std::string TimeToString(long long currentTime) {	//thx gpt
+        struct tm localTime;
+#ifdef _WIN32
+        localtime_s(&localTime, &currentTime);
+#else
+        localtime_r(&currentTime, &localTime);
+#endif
+
+        std::stringstream ss;
+        ss << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
+        return ss.str();
+    }
+    std::string CurrentTimeToString()
+    {
+        std::time_t currentTimee = std::time(nullptr);
+
+        struct tm localTime;
+#ifdef _WIN32
+        localtime_s(&localTime, &currentTimee);
+#else
+        localtime_r(&currentTimee, &localTime);
+#endif
+
+        std::stringstream ss;
+        ss << std::put_time(&localTime, "%Y-%m-%d %H:%M:%S");
+        return ss.str();
+    }
+
+    std::string CurrentTimeToShortString()
+    {
+        std::time_t currentTimee = std::time(nullptr);
+
+        struct tm localTime;
+#ifdef _WIN32
+        localtime_s(&localTime, &currentTimee);
+#else
+        localtime_r(&currentTimee, &localTime);
+#endif
+
+        std::stringstream ss;
+        ss << std::put_time(&localTime, "%H:%M");
+        return ss.str();
     }
 }
