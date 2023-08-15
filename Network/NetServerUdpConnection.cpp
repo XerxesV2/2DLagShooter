@@ -4,10 +4,9 @@
 namespace net
 {
 	template<typename T>
-	ServerUdpConnection<T>::ServerUdpConnection(asio::io_context& asioContext, asio::ip::tcp::endpoint endpoint, uint16_t port, tsQueue<ownedUdpPacket<T>>& qPacketsIn)
-		: m_AsioContext(asioContext), m_Socket(asioContext, asio::ip::udp::endpoint{ asio::ip::make_address(endpoint.address().to_v4().to_string()), port }), m_QueuePacketsIn(qPacketsIn)
+	ServerUdpConnection<T>::ServerUdpConnection(uint32_t id)
 	{
-		this->port = port;
+		this->ID = id;
 	}
 
 	template<typename T>
@@ -16,128 +15,226 @@ namespace net
 	}
 
 	template<typename T>
-	void ServerUdpConnection<T>::StartListen(uint32_t uid)
+	void ServerUdpConnection<T>::StartListen()
 	{
-		this->ID = uid;
-		ReadHeader();
+		m_TempPktIn.body.reserve(256);
+		m_TempPktIn.body.resize(256);
+		static std::thread th([]()
+			{
+				while (1)
+				{
+						ReadBody();
+				}
+			});
 	}
 
 	template<typename T>
-	const bool ServerUdpConnection<T>::IsConnected() const
+	void ServerUdpConnection<T>::AddRemoteEndpoint(asio::ip::tcp::endpoint endpoint, uint16_t port, uint32_t id, std::shared_ptr<ServerUdpConnection<T>> sptr)
 	{
-		return m_Socket.is_open();
+		m_RemoteEndpointsById.insert({ id, asio::ip::udp::endpoint{ endpoint.address().to_v4(), port }});
+#ifdef FOR_LOCAL_DEBUG
+		m_UdpClientsByIp.insert({ endpoint.address().to_v4().to_uint() + port, sptr});
+#else
+		m_UdpClientsByIp.insert({ id, sptr});
+#endif // FOR_LOCAL_DEBUG
 	}
 
 	template<typename T>
-	void ServerUdpConnection<T>::Send(const packet<T>& pkt)
+	void ServerUdpConnection<T>::RemoveRemoteEndpoint(uint32_t id)
+	{
+		m_UdpClientsByIp.erase(m_RemoteEndpointsById[id].address().to_v4().to_uint());
+		m_RemoteEndpointsById.erase(id);
+	}
+
+	template<typename T>
+	void ServerUdpConnection<T>::Send(const udpPacket<T>& pkt, uint32_t id)
 	{
 		/*injecting work*/
-		asio::post(m_AsioContext,
-			[this, pkt]() {
+		asio::post(*m_AsioContext,
+			[pkt, id]() {
 				bool WritingPacket = !m_QueuePacketsOut.Empty();
 				m_QueuePacketsOut.PushBack(pkt);
 
-				if (!WritingPacket) WriteHeader();
+				if (!WritingPacket) WriteBody(id);
 			});
 	}
 
 	template<typename T>
 	void ServerUdpConnection<T>::ReadHeader()
 	{
-		m_Socket.async_receive_from(asio::buffer(&m_TempPktIn.header, sizeof(packetHeader<T>)), m_RemoteEndpoint,
-			[this](std::error_code ec, std::size_t length)
-			{
+		ReadBody();
+		return;
 
-				if (!ec) {
-					if (m_TempPktIn.header.size > 0) {
-						if (m_TempPktIn.header.size <= 4096) {
-							m_TempPktIn.body.resize(m_TempPktIn.header.size - sizeof(packetHeader<T>));
-							ReadBody();
-						}
-						else {
-							ReadHeader();
-						}
-					}
-					else {
-						AddToIncomingPacketQueue();
-					}
+		static std::error_code ec; 
+		std::size_t length = m_Socket->receive_from(asio::buffer(&m_TempPktIn.header, sizeof(udpPacketHeader<T>)), m_RemoteEndpoint, 0, ec);
+
+		if (!ec) {
+			if (m_TempPktIn.header.size > 0) {
+				if (m_TempPktIn.header.size <= 4096) {
+					m_TempPktIn.body.resize(m_TempPktIn.header.size - sizeof(udpPacketHeader<T>));
+					ReadBody();
 				}
 				else {
-					std::cerr << "[ServerUdpConnection] ID: " << ID << " Read header fail." << std::endl;
-					m_Socket.close();
-					m_bAllAsyncReturned = true;
+					return;
 				}
-			});
+			}
+			else {
+#ifdef FOR_LOCAL_DEBUG
+				AddToIncomingPacketQueue(m_RemoteEndpoint.address().to_v4().to_uint() + m_RemoteEndpoint.port());
+#else
+				AddToIncomingPacketQueue(m_TempPktIn.header.id);
+#endif
+			}
+		}
+		else {
+			std::cerr << "[ServerUdpConnection] ID:  Read header fail." << std::endl;
+			//m_Socket->close();
+			m_bAllAsyncReturned = true;
+			return;
+		}
+			
 	}
 
 	template<typename T>
 	void ServerUdpConnection<T>::ReadBody()
 	{
-		m_Socket.async_receive_from(asio::buffer(m_TempPktIn.body.data(), m_TempPktIn.body.size()), m_RemoteEndpoint,
-			[this](std::error_code ec, std::size_t length)
-			{
+		static std::error_code ec;
+		std::size_t length = m_Socket->receive_from(asio::buffer(m_TempPktIn.body.data(), m_TempPktIn.body.size()), m_RemoteEndpoint, 0, ec);
+			
+		if (!ec) {
+			m_TempPktIn.header = *(udpPacketHeader<T>*)m_TempPktIn.body.data();
+			m_TempPktIn.body.erase(m_TempPktIn.body.begin(), m_TempPktIn.body.begin() + sizeof(udpPacketHeader<T>));
 
-				if (!ec) {
-					AddToIncomingPacketQueue();
+			if (m_TempPktIn.header.size > 0) {
+				if (m_TempPktIn.header.size <= 4096) {
+					m_TempPktIn.body.resize(m_TempPktIn.header.size - sizeof(udpPacketHeader<T>));
+#ifdef FOR_LOCAL_DEBUG
+					AddToIncomingPacketQueue(m_RemoteEndpoint.address().to_v4().to_uint() + m_RemoteEndpoint.port());
+#else
+					AddToIncomingPacketQueue(m_TempPktIn.header.id);
+#endif // FOR_LOCAL_DEBUG
+					m_TempPktIn.body.resize(256);
 				}
 				else {
-					std::cerr << "[ServerUdpConnection] ID: " << ID << " Read body fail." << "  Error: " << ec.message() << std::endl;
-					m_Socket.close();
-					m_bAllAsyncReturned = true;
+					return;
 				}
+			}
+			else {
+#ifdef FOR_LOCAL_DEBUG
+				AddToIncomingPacketQueue(m_RemoteEndpoint.address().to_v4().to_uint() + m_RemoteEndpoint.port());
+#else
+				AddToIncomingPacketQueue(m_TempPktIn.header.id);
+#endif // FOR_LOCAL_DEBUG
 
-			});
+			}
+		}
+		else {
+			std::cerr << "[ServerUdpConnection] ID: Read body fail." << "  Error: " << ec.message() << std::endl;
+			//m_Socket->close();
+			m_bAllAsyncReturned = true;
+			return;
+		}
+
+			
 	}
 
 	template<typename T>
-	void ServerUdpConnection<T>::WriteHeader()
+	void ServerUdpConnection<T>::WriteHeader(uint32_t id)
 	{
-		m_Socket.async_send_to(asio::buffer(&m_QueuePacketsOut.Front().header, sizeof(packetHeader<T>)), m_RemoteEndpoint,
-			[this](std::error_code ec, std::size_t length)
-			{
-				if (!ec) {
-					if (m_QueuePacketsOut.Front().body.size() > 0) {
-						WriteBody();
-					}
-					else {
-						m_QueuePacketsOut.PopFront();
+		WriteBody(id);
+		return;
 
-						if (!m_QueuePacketsOut.Empty())
-							WriteHeader();
-					}
-				}
-				else {
-					std::cerr << "[ServerUdpConnection] ID: " << ID << " Write header fail." << std::endl;
-					m_Socket.close();
-				}
-			});
+		//printf("sending udp to: %s on port: %d\n", m_RemoteEndpointsById[id].address().to_v4().to_string().c_str(), m_RemoteEndpointsById[id].port());
+		std::error_code ec;
+		std::size_t length = m_Socket->send_to(asio::buffer(&m_QueuePacketsOut.Front().header, sizeof(udpPacketHeader<T>)), m_RemoteEndpointsById[id], 0, ec);
+		
+		if (!ec) {
+			if (m_QueuePacketsOut.Front().body.size() > 0) {
+				WriteBody(id);
+			}
+			else {
+				m_QueuePacketsOut.PopFront();
+
+				if (!m_QueuePacketsOut.Empty())
+					WriteHeader(id);
+			}
+		}
+		else {
+			std::cerr << "[ServerUdpConnection] ID: " << id << " Write header fail." << std::endl;
+			//m_Socket->close();
+			WriteHeader(id);
+		}
+		
+
+		//m_Socket->async_send_to(asio::buffer(&m_QueuePacketsOut.Front().header, sizeof(packetHeader<T>)), m_RemoteEndpointsById[id],
+		//	[=](std::error_code ec, std::size_t length)
+		//	{
+		//		if (!ec) {
+		//			if (m_QueuePacketsOut.Front().body.size() > 0) {
+		//				WriteBody(id);
+		//				printf("id: %d\n", id);
+		//			}
+		//			else {
+		//				m_QueuePacketsOut.PopFront();
+
+		//				if (!m_QueuePacketsOut.Empty())
+		//					WriteHeader(id);
+		//			}
+		//		}
+		//		else {
+		//			std::cerr << "[ServerUdpConnection] ID: " << id << " Write header fail." << std::endl;
+		//			//m_Socket->close();
+		//			WriteHeader(id);
+		//		}
+		//	});
 
 	}
 
 	template<typename T>
-	void ServerUdpConnection<T>::WriteBody()
+	void ServerUdpConnection<T>::WriteBody(uint32_t id)
 	{
-		m_Socket.async_send_to(asio::buffer(m_QueuePacketsOut.Front().body.data(), m_QueuePacketsOut.Front().body.size()), m_RemoteEndpoint,
-			[this](std::error_code ec, std::size_t length)
-			{
-				if (!ec) {
-					m_QueuePacketsOut.PopFront();
+		std::error_code ec;
+		std::size_t length = m_Socket->send_to(asio::buffer(m_QueuePacketsOut.Front().body.data(), m_QueuePacketsOut.Front().body.size()), m_RemoteEndpointsById[id], 0, ec);
+		
+		if (!ec) {
+			m_QueuePacketsOut.PopFront();
 
-					if (!m_QueuePacketsOut.Empty())
-						WriteHeader();
-				}
-				else {
-					std::cerr << "[ServerUdpConnection] ID: " << ID << " Write body fail." << std::endl;
-					m_Socket.close();
-				}
-			});
+			if (!m_QueuePacketsOut.Empty())
+				WriteBody(id);
+		}
+		else {
+			std::cerr << "[ServerUdpConnection] ID: " << id << " Write body fail." << std::endl;
+			//m_Socket->close();
+			WriteBody(id);
+		}
+		
+
+		//m_Socket->async_send_to(asio::buffer(m_QueuePacketsOut.Front().body.data(), m_QueuePacketsOut.Front().body.size()), m_RemoteEndpointsById[id],
+		//	[=](std::error_code ec, std::size_t length)
+		//	{
+		//		if (!ec) {
+		//			m_QueuePacketsOut.PopFront();
+
+		//			if (!m_QueuePacketsOut.Empty())
+		//				WriteHeader(id);
+		//		}
+		//		else {
+		//			std::cerr << "[ServerUdpConnection] ID: " << id << " Write body fail." << std::endl;
+		//			//m_Socket->close();
+		//			WriteHeader(id);
+		//		}
+		//	});
 	}
 
 	template<typename T>
-	void ServerUdpConnection<T>::AddToIncomingPacketQueue()
+	void ServerUdpConnection<T>::AddToIncomingPacketQueue(uint32_t uid)
 	{
-		m_QueuePacketsIn.PushBack({ this->shared_from_this(), m_TempPktIn });
-		ReadHeader();
+		if (m_UdpClientsByIp.find(uid) == m_UdpClientsByIp.end()) {
+			printf("AddToIncomingPacketQueue non existent uip\n");
+			return;
+		}
+		m_QueuePacketsIn->PushBack({ m_UdpClientsByIp[uid], m_TempPktIn });
+		//ReadHeader();
 	}
 
 	template class ServerUdpConnection<MessageTypes>;

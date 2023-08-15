@@ -84,6 +84,7 @@ namespace net
 				else {
 					std::cerr << "[ServerConnection] ID: " << ID << " Read header fail." << std::endl;
 					m_Socket.close();
+					m_bAllAsyncReturned = true;
 				}
 			});
 	}
@@ -101,6 +102,7 @@ namespace net
 				else {
 					std::cerr << "[ServerConnection] ID: " << ID << " Read body fail." << "  Error: " << ec.message() << std::endl;
 					m_Socket.close();
+					m_bAllAsyncReturned = true;
 				}
 
 			});

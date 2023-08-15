@@ -25,7 +25,7 @@ namespace net
 					ReadHeader();
 				}
 				else {
-					std::cerr << "[ClientConnection] ID: " << ID << " Connect to server fail." << std::endl;
+					std::cerr << "[ClientConnection] ID: " << ID << " Connect to server fail.\nReason: " << ec.message() << std::endl;
 					return false;
 				}
 
@@ -84,7 +84,7 @@ namespace net
 				}
 			}
 			else {
-				std::cerr << "[ClientConnection] ID: " << ID << " Read header fail." << std::endl;
+				std::cerr << "[ClientConnection] ID: " << ID << " Read header fail.\nReason: " << ec.message() << std::endl;
 				m_Socket.close();
 			}
 		});
@@ -127,7 +127,7 @@ namespace net
 				}
 			}
 			else {
-				std::cerr << "[ClientConnection] ID: " << ID << " Write header fail." << std::endl;
+				std::cerr << "[ClientConnection] ID: " << ID << " Write header fail.\nReason: " << ec.message() << std::endl;
 				m_Socket.close();
 			}
 		});

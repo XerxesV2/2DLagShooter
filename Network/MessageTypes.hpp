@@ -21,18 +21,26 @@ enum class GameMessages : uint8_t
 	MessageAll,
 	ServerMessage,
 	BadClient,
+	BannedClient,
+	Disconnect,
 
 	Login,
 	LoginAccept,
 	LoginRefuse,
+	AutoLogin,
+	AutoLoginFail,
+	AutoLoginSuccess,
 	RegisterClient,
 	SetClientID,
+	LoginNameTaken,
 
 	AddPlayer,
 	RemovePlayer,
 	UpdatePlayerMovement,
 	UpdatePlayerActions,
+	WorldState,
 	GameStateUpdate,
+	FlagStateUpdate,
 	PlayerDied,
 
 	UdpTest,
@@ -41,7 +49,9 @@ enum class GameMessages : uint8_t
 	ChatMessage,
 	ChatCommand,
 
-	UpdateStats,
+	UpdateStatus,
+	NoPermission,
+	MysteriousError,
 
 	None
 };

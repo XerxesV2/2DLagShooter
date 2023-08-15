@@ -27,7 +27,7 @@ namespace net
 
 		void Clear() {
 			body.clear();
-			//bytesRead = 0;
+			header.size = sizeof(packetHeader<T>);
 		}
 
 		GameMessages GetNextSubPacketType() {
@@ -87,6 +87,99 @@ namespace net
 		}
 	};
 
+
+	template <typename T>
+	struct udpPacketHeader
+	{
+		float sendTime = 0.f;
+		uint32_t id = 0;
+		uint32_t size = 0;
+	};
+
+	template <typename T>
+	struct udpPacket
+	{
+		udpPacket()
+		{
+			body.resize(sizeof(udpPacketHeader<T>));
+		}
+
+		udpPacketHeader<T> header{};
+		std::vector<uint8_t> body;	//in bytes
+		uint32_t bytesRead = 0;
+
+		size_t Size() const {
+			return body.size();
+		}
+
+		void Clear() {
+			//body.clear();
+			body.resize(sizeof(udpPacketHeader<T>));	//is this enought?
+			header.size = sizeof(udpPacketHeader<T>);
+		}
+
+		void AddHeaderToBody() {
+			std::memcpy(body.data(), &header, sizeof(udpPacketHeader<T>));
+		}
+
+		GameMessages GetNextSubPacketType() {
+			bytesRead += sizeof(GameMessages);	//no temp var pls
+			return *(GameMessages*)(body.data() + bytesRead - sizeof(GameMessages));
+		}
+
+		template<typename dataType>
+		dataType* GetSubPacketPtr() {
+			bytesRead += sizeof(dataType);
+			if (bytesRead > body.size()) return nullptr;
+			return (dataType*)(body.data() + bytesRead - sizeof(dataType));
+		}
+
+		GameMessages PeekNextPacketType() {
+			if (bytesRead == body.size()) return GameMessages::None;
+			return *(GameMessages*)(body.data() + bytesRead);
+		}
+
+		friend std::ostream& operator << (std::ostream& os, const udpPacket<T>& pac) {
+			os << "ID: " << (int)pac.header.id << "  Size: " << pac.header.size << "\n";
+			return os;
+		}
+
+		template<typename dataType>
+		friend udpPacket<T>& operator << (udpPacket<T>& pac, const dataType& data) {
+
+#ifdef _WIN32
+			//static_assert(std::is_standard_layout<dataType>::value, "Data is too complex to be pushed at line: " + __LINE__);
+			static_assert(std::is_standard_layout<dataType>::value, "Data is too complex to be pushed");
+#else
+			static_assert(std::is_standard_layout<dataType>::value, "Data is too complex to be pushed");
+#endif
+			const size_t offset = pac.body.size();	//prev size, the point to memcopy the data
+			pac.body.resize(pac.body.size() + sizeof(dataType));	//resize preformance issue
+			std::memcpy(pac.body.data() + offset, &data, sizeof(dataType));
+			pac.header.size = pac.Size();
+
+			return pac;
+		}
+
+		template<typename dataType>
+		friend udpPacket<T>& operator >> (udpPacket<T>& pac, dataType& data) {
+
+#ifdef _WIN32
+			//static_assert(std::is_standard_layout<dataType>::value, "Data is too complex to be pushed at line: " + __LINE__);
+			static_assert(std::is_standard_layout<dataType>::value, "Data is too complex to be pushed");
+#else
+			static_assert(std::is_standard_layout<dataType>::value, "Data is too complex to be pushed");
+#endif
+			const size_t offset = pac.body.size() - sizeof(dataType);	//offset from th back
+			std::memcpy(&data, pac.body.data() + offset, sizeof(dataType));
+			pac.body.resize(offset);
+			pac.header.size = offset;
+
+			return pac;
+		}
+	};
+
+
 #ifdef SERVER_CONNECTION
 	template<typename T>
 	class ServerConnection;
@@ -110,7 +203,7 @@ namespace net
 	struct ownedUdpPacket
 	{
 		std::shared_ptr<ServerUdpConnection<T>> remote = nullptr;
-		packet<T> pkt;
+		udpPacket<T> pkt;
 
 		friend std::ostream& operator << (std::ostream& os, const ownedUdpPacket<T>& pkt) {
 			os << pkt;
@@ -133,7 +226,7 @@ namespace net
 	template<typename T>
 	struct ownedUdpPacket
 	{
-		packet<T> pkt;
+		udpPacket<T> pkt;
 
 		friend std::ostream& operator << (std::ostream& os, const ownedUdpPacket<T>& pkt) {
 			os << pkt;

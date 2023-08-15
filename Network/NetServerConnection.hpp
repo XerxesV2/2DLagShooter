@@ -21,8 +21,12 @@ namespace net
 		const bool Disconnect();
 		const bool IsConnected() const;
 		const uint32_t GetID() const { return ID; };
+		void SetGroupID(uint32_t id) { m_GroupId = id; };
+		const uint32_t GetGroupID() const { return m_GroupId; };
 		const asio::ip::tcp::socket& GetSocket() const { return m_Socket; };
 		const asio::ip::address GetIP() const { return m_Socket.remote_endpoint().address(); };
+		asio::ip::tcp::socket& GetSocket() { return m_Socket; }
+		const bool ReadyToDestroy() { return m_bAllAsyncReturned.load(); }
 
 		void Send(const packet<T>& pkt);
 
@@ -44,7 +48,9 @@ namespace net
 		packet<T> m_TempPktIn;
 
 		uint32_t ID = 0;
+		uint32_t m_GroupId = 0;
 
+		std::atomic_bool m_bAllAsyncReturned = false;
 		packet<T> checksumPkt;	//one static keyword = 2hours
 		char m_CheckSumIn[65];
 

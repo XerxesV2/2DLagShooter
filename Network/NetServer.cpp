@@ -4,25 +4,35 @@
 namespace net
 {
 	template<typename T>
-	ServerInterface<T>::ServerInterface(uint16_t tcp_port, uint16_t udp_port)
-		: m_AsioAcceptor(m_AsioContext, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), tcp_port))
+	ServerInterface<T>::ServerInterface(uint16_t tcp_port)
+		: m_AsioAcceptor(m_AsioContext, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), tcp_port)),
+		m_UdpSocket(m_AsioContext, asio::ip::udp::endpoint(asio::ip::udp::v4(), m_client_send_udp_port))
 	{
-		m_udp_port = udp_port;
+		printf("Udp receive port: %d\nUdp send port: %d", m_client_receive_udp_port, m_client_send_udp_port);
+	
+		ServerUdpConnection<T>::m_AsioContext = &m_AsioContext;
+		ServerUdpConnection<T>::m_Socket = &m_UdpSocket;
+		ServerUdpConnection<T>::m_QueuePacketsIn = &m_QueueUdpPacketsIn;
+
+		ServerUdpConnection<T>::StartListen();
+
 		std::ifstream hashFile("hash.txt", std::ios::in);
 		if (hashFile.is_open()){
-			m_ClientCheckSum = new char[65];
+			m_ClientChecksum = new char[65];
 			std::string str;
 			std::getline(hashFile, str);
-			memcpy(m_ClientCheckSum, str.c_str(), 65);
+			memcpy(m_ClientChecksum, str.c_str(), 65);
 			hashFile.close();
 		}
 
+		CreateNewConnectionGroup((uint32_t)ConnectionGroup::LOBBY);
+		CreateNewConnectionGroup((uint32_t)ConnectionGroup::GAME);
 	}
 
 	template<typename T>
 	ServerInterface<T>::~ServerInterface()
 	{
-		delete m_ClientCheckSum;
+		delete m_ClientChecksum;
 		Stop();
 	}
 
@@ -79,37 +89,52 @@ namespace net
 	template<typename T>
 	void ServerInterface<T>::ListenForClientConnection()
 	{
+
 		m_AsioAcceptor.async_accept(
 			[this](std::error_code ec, asio::ip::tcp::socket socket) {
-				if (!ec) {
-					std::cout << "[SERVER] New connection from: " << socket.remote_endpoint() << std::endl;
+				try
+				{
+					if (!ec) {
+						printf("\n+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+\n");
+						std::cout << "[SERVER] New connection from: " << socket.remote_endpoint() << std::endl;
 
-					std::shared_ptr<ServerUdpConnection<T>> newUdpConnection =
-						std::make_shared<ServerUdpConnection<T>>(m_AsioContext, socket.remote_endpoint(), m_udp_port, m_QueueUdpPacketsIn);
+						std::shared_ptr<ServerUdpConnection<T>> newUdpConnection =
+							std::make_shared<ServerUdpConnection<T>>(m_CurrentID);
+						ServerUdpConnection<T>::AddRemoteEndpoint(socket.remote_endpoint(), m_client_receive_udp_port, m_CurrentID, newUdpConnection);
+
+						std::shared_ptr<ServerConnection<T>> newTcpConnection =
+							std::make_shared<ServerConnection<T>>(m_AsioContext, std::move(socket), m_QueuePacketsIn);
+
+						newTcpConnection->SetGroupID((uint32_t)ConnectionGroup::LOBBY);
+						newUdpConnection->SetGroupID((uint32_t)ConnectionGroup::LOBBY);
+
+						if (OnClientConnect(newTcpConnection, newUdpConnection)) {
+							newTcpConnection->ConnectToClient(this, m_ClientChecksum, m_CurrentID++);
+							std::cout << "[SERVER] New connection ID: " << newTcpConnection->GetID() << std::endl;
+							//newUdpConnection->SetPort(m_client_receive_udp_port);
+							
+							AddConnectionToGroup(newTcpConnection, newUdpConnection, newTcpConnection->GetGroupID());
+							//m_DeqConnections.push_back({ std::move(newTcpConnection), std::move(newUdpConnection) });
+							SendUdpPort();
 
 #ifdef _DEBUG
-					++m_udp_port;
+							++m_client_receive_udp_port;
 #endif // _DEBUG
-
-					std::shared_ptr<ServerConnection<T>> newConnection =
-						std::make_shared<ServerConnection<T>>(m_AsioContext, std::move(socket), m_QueuePacketsIn);
-
-					if (OnClientConnect(newConnection, newUdpConnection)) {
-						newConnection->ConnectToClient(this, m_ClientCheckSum, m_CurrentID++);
-						std::cout << "[SERVER] New connection ID: " << newConnection->GetID() << std::endl;
-						newUdpConnection->StartListen(newConnection->GetID());
-						m_DeqConnections.push_back({ std::move(newConnection), std::move(newUdpConnection) });
-						//m_DeqUdpConnections.push_back(std::move(newUdpConnection));
-						SendUdpPort();
+						}
+						else {
+							std::cout << "[SERVER] ServerConnection from: " << socket.remote_endpoint() << " is refused." << std::endl;
+						}
 					}
 					else {
-						std::cout << "[SERVER] ServerConnection from: " << socket.remote_endpoint() << " is refused." << std::endl;
+						std::cerr << "[SERVER] Listen Error: " << ec.message() << std::endl;
 					}
+					ListenForClientConnection();
 				}
-				else {
-					std::cerr << "[SERVER] Listen Error: " << ec.message() << std::endl;
+				catch (std::exception e)
+				{
+					std::cout << "[NEW CONNECTION] Error: " << e.what() << std::endl;
+					ListenForClientConnection();
 				}
-				ListenForClientConnection();
 			});
 	}
 
@@ -122,32 +147,23 @@ namespace net
 			}
 			else {
 				OnClientDisconnect(client);	//TODO send keepalive
-				client.reset();
 
 				/*expensive*/
 
-				m_DeqConnections.erase(std::remove_if(m_DeqConnections.begin(), m_DeqConnections.end(), [&client, this](Connection& conn)
-					{
-						if (client == conn.tcp) {
-							conn.udp->GetSocket().cancel();
-							m_DeadUdpConnections.push_back(std::move(conn.udp)); return true; }
-					}), m_DeqConnections.end());
-
-				m_DeadUdpConnections.erase(std::remove_if(m_DeadUdpConnections.begin(), m_DeadUdpConnections.end(), [](std::shared_ptr<ServerUdpConnection<T>>& conn)
-					{
-						return (conn->ReadyToDestroy());
-					}), m_DeadUdpConnections.end());
+				RemoveConnection(client);
 			}
 		}
 		else std::cerr << "[SERVER] -SEND- client was nullptr." << std::endl;
 	}
 
 	template<typename T>
-	void ServerInterface<T>::SendTcpPacketToAll(const packet<T>& pkt, std::shared_ptr<ServerConnection<T>> ignore)
+	void ServerInterface<T>::SendTcpPacketToAll(const uint32_t gid, const packet<T>& pkt, std::shared_ptr<ServerConnection<T>> ignore)
 	{
+		std::deque<Connection>& deqConnections = m_MapConnectionGroups[gid];
+
 		bool bFoundDeadClient = false;
 
-		for (auto& client : m_DeqConnections) {
+		for (auto& client : deqConnections) {
 			if (client.tcp) {
 				if (client.tcp->IsConnected()) {
 					if(client.tcp != ignore) client.tcp->Send(pkt);
@@ -155,8 +171,7 @@ namespace net
 				else if (client.tcp != ignore) {
 					OnClientDisconnect(client.tcp);
 					client.tcp.reset();
-					client.udp->GetSocket().cancel();
-					m_DeadUdpConnections.push_back(std::move(client.udp));
+					ServerUdpConnection<T>::RemoveRemoteEndpoint(client.udp->GetID());
 					
 					bFoundDeadClient = true;
 				}
@@ -165,24 +180,19 @@ namespace net
 		}
 
 		if (bFoundDeadClient) {
-			m_DeqConnections.erase(std::remove_if(m_DeqConnections.begin(), m_DeqConnections.end(), [](Connection& conn)
+			deqConnections.erase(std::remove_if(deqConnections.begin(), deqConnections.end(), [](Connection& conn)
 				{
 					return (conn.tcp == nullptr);
-				}), m_DeqConnections.end());
-
-			m_DeadUdpConnections.erase(std::remove_if(m_DeadUdpConnections.begin(), m_DeadUdpConnections.end(), [](std::shared_ptr<ServerUdpConnection<T>>& conn)
-				{
-					return (conn->ReadyToDestroy());
-				}), m_DeadUdpConnections.end());
+				}), deqConnections.end());
 		}
 	}
 
 	template<typename T>
-	void ServerInterface<T>::SendUdpPacket(std::shared_ptr<ServerUdpConnection<T>> client, const packet<T>& pkt)
+	void ServerInterface<T>::SendUdpPacket(std::shared_ptr<ServerUdpConnection<T>> client, const udpPacket<T>& pkt)
 	{
 		if (client) {
 			if (client->IsConnected()) {
-				client->Send(pkt);
+				client->Send(pkt, client->GetID());
 			}
 			else {
 				//OnClientDisconnect(client);	
@@ -194,14 +204,16 @@ namespace net
 	}
 
 	template<typename T>
-	void ServerInterface<T>::SendUdpPacketToAll(const packet<T>& pkt, std::shared_ptr<ServerUdpConnection<T>> ignore)
+	void ServerInterface<T>::SendUdpPacketToAll(const uint32_t gid, const udpPacket<T>& pkt, std::shared_ptr<ServerUdpConnection<T>> ignore)
 	{
+		std::deque<Connection>& deqConnections = m_MapConnectionGroups[gid];
+
 		bool bFoundDeadClient = false;
 
-		for (auto& client : m_DeqConnections) {
+		for (auto& client : deqConnections) {
 			if (client.udp) {
 				if (client.udp->IsConnected()) {
-					if (client.udp != ignore) client.udp->Send(pkt);
+					if (client.udp != ignore) client.udp->Send(pkt, client.udp->GetID());
 				}
 				else if (client.udp != ignore) {
 					//OnClientDisconnect(client);
@@ -217,13 +229,82 @@ namespace net
 	}
 
 	template<typename T>
+	void ServerInterface<T>::RemoveConnection(std::shared_ptr<ServerConnection<T>> client)
+	{
+		std::deque<Connection>& deqConnections = m_MapConnectionGroups[client->GetGroupID()];
+		deqConnections.erase(std::remove_if(deqConnections.begin(), deqConnections.end(), [&client, this](Connection& conn)
+			{
+				if (client == conn.tcp) {
+					if (conn.tcp->IsConnected()) conn.tcp->GetSocket().cancel();
+					ServerUdpConnection<T>::RemoveRemoteEndpoint(conn.udp->GetID());
+					m_DeadConnections.push_back(std::move(conn));
+					return true;
+				}
+			}), deqConnections.end());
+		//client.reset();
+
+		m_DeadConnections.erase(std::remove_if(m_DeadConnections.begin(), m_DeadConnections.end(), [](Connection& conn)
+			{
+				return ((conn.tcp && conn.tcp->ReadyToDestroy()));
+			}), m_DeadConnections.end());
+	}
+
+	template<typename T>
+	void ServerInterface<T>::CreateNewConnectionGroup(uint32_t groupId)
+	{
+		if (m_MapConnectionGroups.find(groupId) != m_MapConnectionGroups.end()) {
+			std::cout << "[CreateNewConnectionGroup] id: " << groupId << " is already exists\n";	//should never happen
+			return;
+		}
+		m_MapConnectionGroups.insert({ groupId, std::deque<Connection>{} });
+	}
+
+	template<typename T>
+	void ServerInterface<T>::AddConnectionToGroup(std::shared_ptr<ServerConnection<T>> tcp, std::shared_ptr<ServerUdpConnection<T>> udp, uint32_t groupId)
+	{
+		if (m_MapConnectionGroups.find(groupId) == m_MapConnectionGroups.end()) {
+			std::cout << "[AddConnectionToGroup] id: " << groupId << " is not found\n";	//should never happen either
+			return;
+		}
+		m_MapConnectionGroups[groupId].push_back({ std::move(tcp), std::move(udp) });
+	}
+
+	template<typename T>
+	void ServerInterface<T>::MoveConnectionToGroup(std::shared_ptr<ServerConnection<T>> tcp, uint32_t groupId)
+	{
+		//bit fckin slow
+		if (m_MapConnectionGroups.find(groupId) == m_MapConnectionGroups.end()) {
+			std::cout << "[MoveConnectionToGroup] id: " << groupId << " is not found\n";	//should never happen
+			return;
+		}
+
+		std::deque<Connection>& deqFromConnections = m_MapConnectionGroups[tcp->GetGroupID()];
+		std::deque<Connection>& deqToConnections = m_MapConnectionGroups[groupId];
+		deqFromConnections.erase(std::remove_if(deqFromConnections.begin(), deqFromConnections.end(), [&, this](Connection& conn)
+			{
+				if (tcp == conn.tcp) {
+					conn.tcp->SetGroupID(groupId);
+					conn.udp->SetGroupID(groupId);
+					deqToConnections.push_back(std::move(conn));
+					return true;
+				}
+			}), deqFromConnections.end());
+	}
+
+	template<typename T>
+	void ServerInterface<T>::AddFreedUdpPort(const uint16_t port)
+	{
+		m_FreeUdpPorts.PushFront(port);
+	}
+
+	template<typename T>
 	bool ServerInterface<T>::OnClientConnect(std::shared_ptr<ServerConnection<T>> tcpClient, std::shared_ptr<ServerUdpConnection<T>> udpClient)
 	{
 		return false;
 	}
 
 	template<typename T>
-	void ServerInterface<T>::OnClientDisconnect(std::shared_ptr<ServerConnection<T>> client)
+	void ServerInterface<T>::OnClientDisconnect(const std::shared_ptr<ServerConnection<T>>& client)
 	{
 		
 	}
@@ -235,7 +316,7 @@ namespace net
 	}
 
 	template<typename T>
-	void ServerInterface<T>::OnUdpPacketReceived(std::shared_ptr<ServerUdpConnection<T>> client, packet<T>& packet)
+	void ServerInterface<T>::OnUdpPacketReceived(std::shared_ptr<ServerUdpConnection<T>> client, udpPacket<T>& packet)
 	{
 	}
 
@@ -252,22 +333,13 @@ namespace net
 	}
 
 	template<typename T>
-	void ServerInterface<T>::CheckClients()
-	{
-		return;
-		static std::thread th([this]()
-			{
-				
-			});
-	}
-
-	template<typename T>
 	void ServerInterface<T>::SendUdpPort()
 	{
 		net::packet<T> UdpPortpkt;
 		UdpPortpkt << GameMessages::AssignUdpPort;
-		UdpPortpkt << m_DeqConnections.back().udp->GetPort();
-		SendTcpPacket(m_DeqConnections.back().tcp, UdpPortpkt);
+		UdpPortpkt << m_client_receive_udp_port;
+		UdpPortpkt << m_client_send_udp_port; //m_MapConnectionGroups[(uint32_t)ConnectionGroup::LOBBY].back().udp->GetPort();
+		SendTcpPacket(m_MapConnectionGroups[(uint32_t)ConnectionGroup::LOBBY].back().tcp, UdpPortpkt);
 	}
 
 	template class ServerInterface<MessageTypes>;
